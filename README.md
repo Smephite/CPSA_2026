@@ -6,7 +6,38 @@ The current runtime is centered on dual BlueCoin IMU acquisition and a staged vi
 
 ---
 
-## Features
+## Table of Contents
+
+- [System View](#system-view)
+- [Architecture and Working Principle](#architecture-and-working-principle)
+  - [Architecture](#architecture)
+  - [Runtime Flow](#runtime-flow)
+  - [Project Structure](#project-structure)
+- [Installation, Configuration, and Troubleshooting](#installation-configuration-and-troubleshooting)
+  - [Target Environment](#target-environment)
+  - [System Dependencies](#system-dependencies)
+  - [Python Dependencies](#python-dependencies)
+  - [DPU / Vitis-AI Runtime Setup](#dpu--vitis-ai-runtime-setup)
+  - [Configuration](#configuration)
+  - [Run Procedure](#run-procedure)
+  - [Operational Shutdown](#operational-shutdown)
+  - [Troubleshooting](#troubleshooting)
+- [Runtime Components](#runtime-components)
+  - [IMU Pipeline](#imu-pipeline)
+  - [Video Pipeline](#video-pipeline)
+  - [Event System and Dispatcher](#event-system-and-dispatcher)
+  - [Actuation Policy and Actuator Layer](#actuation-policy-and-actuator-layer)
+  - [Dashboard](#dashboard)
+  - [Logging](#logging)
+- [Extensions](#extensions)
+  - [BlueCoin Feature Listeners and Custom Features](#bluecoin-feature-listeners-and-custom-features)
+  - [Add a New Sensor](#add-a-new-sensor)
+  - [Add a New Actuator](#add-a-new-actuator)
+  - [Add a New Video Stage](#add-a-new-video-stage)
+- [Notes on Current Behavior](#notes-on-current-behavior)
+
+
+## System View
 
 - Dual-wrist BLE BlueCoin acquisition
 - Accelerometer, gyroscope, and quaternion/sensor-fusion feature listeners
@@ -30,34 +61,11 @@ The current runtime is centered on dual BlueCoin IMU acquisition and a staged vi
 
 ---
 
-## Table of Contents
+## Architecture and Working Principle
 
-- [Architecture](#architecture)
-- [Runtime Flow](#runtime-flow)
-- [Project Structure](#project-structure)
-- [Requirements](#requirements)
-- [System Dependencies](#system-dependencies)
-- [Python Dependencies](#python-dependencies)
-- [Configuration](#configuration)
-- [Running the System](#running-the-system)
-- [IMU Pipeline](#imu-pipeline)
-- [BlueCoin Feature Listeners and Custom Features](#bluecoin-feature-listeners-and-custom-features)
-- [Video Pipeline](#video-pipeline)
-- [Event System](#event-system)
-- [Event Dispatcher](#event-dispatcher)
-- [Actuation Policy](#actuation-policy)
-- [Actuator Layer](#actuator-layer)
-- [Dashboard](#dashboard)
-- [Logging](#logging)
-- [Shutdown](#shutdown)
-- [Bluetooth and BlueST SDK Notes](#bluetooth-and-bluest-sdk-notes)
-- [MetaWear / MetaMotion Notes](#metawear--metamotion-notes)
-- [DPU / Vitis-AI Notes](#dpu--vitis-ai-notes)
-- [Extending the System](#extending-the-system)
+The system is organized around an IMU-first event loop. Dual BlueCoin devices provide synchronized wrist motion data. The classifier produces stereotypy tags. The dispatcher consumes the latest tag, switches video stages as needed, and asks the actuation policy to select feedback behavior. The dashboard owns video rendering and termination input.
 
----
-
-## Architecture
+### Architecture
 
 ```text
 Dual BlueCoin BLE Sensors
@@ -107,7 +115,7 @@ The dispatcher is the central coordinator. It consumes IMU classifier events, up
 
 ---
 
-## Runtime Flow
+### Runtime Flow
 
 `main.py` is the runtime entry point. It performs the following sequence:
 
@@ -143,7 +151,7 @@ Important runtime details:
 
 ---
 
-## Project Structure
+### Project Structure
 
 ```text
 CPSA_2026/
@@ -210,7 +218,11 @@ CPSA_2026/
 
 ---
 
-## Requirements
+## Installation, Configuration, and Troubleshooting
+
+This block contains the target environment, dependency installation, DPU setup, configuration, run procedure, shutdown behavior, and common troubleshooting notes. Use it as the operational reference before changing runtime code.
+
+### Target Environment
 
 Tested target environment:
 
@@ -227,7 +239,7 @@ Tested target environment:
 
 ---
 
-## System Dependencies
+### System Dependencies
 
 ```bash
 sudo apt update
@@ -247,7 +259,7 @@ The DPU video pipeline also requires the Xilinx runtime packages that provide `x
 
 ---
 
-## Python Dependencies
+### Python Dependencies
 
 Install the Python dependencies in the same Python environment used to run `main.py`.
 
@@ -273,7 +285,32 @@ pip install opencv-python
 
 ---
 
-## Configuration
+### DPU / Vitis-AI Runtime Setup
+
+The video pipeline requires the Xilinx runtime modules used by the Python code:
+
+```python
+import xir
+import vart
+```
+
+`xir` and `vart` are normally provided by the Xilinx / Vitis-AI runtime, not by standard PyPI. Load the DPU overlay on KV260 before starting the runtime:
+
+```bash
+bash xmutil_load_dpu.sh
+```
+
+That script should wrap the required `xmutil loadapp ...` command and the DPU firmware path used by the deployed system. Run it once during system startup, before executing `python3 main.py`. The `DPU_FIRMWARE/` directory contains the firmware/application files required by the KV260 DPU overlay.
+
+The model paths are configured in `config.yaml`:
+
+```yaml
+yolo_model_name: "/path/to/yolo_model.xmodel"
+movenet_model_name: "/path/to/movenet_model.xmodel"
+```
+
+
+### Configuration
 
 The main configuration file is:
 
@@ -343,7 +380,7 @@ Make sure the BlueCoin names match the names exposed by the BLE devices. `main.p
 
 ---
 
-## Running the System
+### Run Procedure
 
 Load the DPU firmware/overlay first, then run the Python entry point directly:
 
@@ -361,393 +398,7 @@ The system remains active until:
 
 ---
 
-## IMU Pipeline
-
-The IMU pipeline is managed by `SensorManager`.
-
-At initialization, `SensorManager`:
-
-1. loads the BlueCoin configuration,
-2. creates an `IMUSynchronizer`,
-3. creates a `StereotipyClassifier`,
-4. connects the synchronizer buffer output to the classifier recognizer,
-5. scans for BlueCoin devices,
-6. validates `bc_left` and `bc_right`,
-7. starts one `BlueCoinThread` per configured device.
-
-Each BlueCoin thread uses feature listeners for:
-
-- accelerometer,
-- gyroscope,
-- quaternion / MEMS sensor fusion.
-
-
-### BlueCoin Feature Listeners and Custom Features
-
-BlueCoin devices can expose more BLE features than the three currently used by CPSA. The current IMU pipeline uses accelerometer, gyroscope, and MEMS sensor-fusion/quaternion data because those are the signals required by the dual-wrist processing and classifier chain. Other BlueCoin firmware images may expose additional sensors or features, for example audio, environmental signals, activity-recognition outputs, or other custom BlueST protocol features.
-
-The official reference for the Python SDK is:
-
-```text
-https://github.com/STMicroelectronics/BlueSTSDK_Python
-```
-
-In this project, a BlueCoin feature must be represented in two places before it can become useful at runtime. First, the SDK must know how to decode the feature. Standard SDK features can be imported directly from `blue_st_sdk.features`. Missing or project-specific features should be implemented under `sensors/BLE/`, as done for:
-
-```bash
-sensors/BLE/feature_mems_sensor_fusion_compact.py
-```
-
-Second, the project must define a listener for that feature in:
-
-```bash
-sensors/BLE/feature_listeners.py
-```
-
-The listener is the bridge between BlueST notifications and the CPSA runtime. It receives values from the BlueCoin feature callback, converts them into the format expected by the rest of the system, and forwards them either to the synchronizer, the buffer/classifier chain, or directly to the event queue.
-
-The current listener pattern is:
-
-```text
-BlueCoin feature notification
-        ▼
-Feature listener
-        ▼
-Parsed values + timestamp
-        ▼
-IMUSynchronizer.update(device_id, kind, values, ts)
-```
-
-The current synchronizer accepts only these `kind` values:
-
-```text
-acc
-gyr
-quat
-```
-
-Therefore, adding a new BlueCoin feature usually requires deciding where the new signal belongs:
-
-1. If it is part of the existing dual-wrist IMU classifier input, add a listener and extend `IMUSynchronizer`, `DataBuffer`, the C processing wrapper, and the classifier input format as needed.
-2. If it is an independent signal, add a listener that creates its own event and pushes it to the shared event queue. In this case, it does not need to pass through the current IMU synchronizer.
-3. If it is only used for diagnostics or logging, the listener can log or store the value without changing the classifier pipeline.
-
-To add a new BlueCoin feature, the normal implementation path is:
-
-1. verify the feature is exposed by the BlueCoin firmware, for example with the ST BLE Sensor app or a BlueST SDK example;
-2. import or implement the feature decoder;
-3. define a matching listener in `sensors/BLE/feature_listeners.py`;
-4. update `SensorManager.initialize_sensors()` to retrieve the feature with `node.get_feature(...)`;
-5. append both the feature and its listener to the `features` and `listeners` lists passed to `BlueCoinThread`;
-6. route the decoded values to the synchronizer, event queue, logger, or another pipeline.
-
-A listener should remain lightweight. Avoid heavy processing inside the BLE notification callback. Parse values, attach a timestamp, and pass the data to the correct downstream component.
-
-The synchronized row format is:
-
-```text
-RIGHT: acc(3), gyr(3), quat(4)
-LEFT : acc(3), gyr(3), quat(4)
-```
-
-Each row contains 20 values.
-
-### Synchronization
-
-`IMUSynchronizer` aligns the left and right wrist streams using timing constraints from `config.yaml`:
-
-```yaml
-sync:
-  max_skew_ms: 30
-  stale_ms: 50
-```
-
-It waits for complete accelerometer, gyroscope, and quaternion samples from both wrists. Misaligned or stale samples are dropped to preserve real-time behavior.
-
-### Buffering and Processing
-
-`DataBuffer` collects synchronized rows and emits sliding windows.
-
-```yaml
-buffer:
-  window_size: 150
-  overlap: 75
-```
-
-When a window is ready, the buffer:
-
-1. builds per-channel arrays,
-2. scales and converts sensor units,
-3. applies calibration behavior,
-4. calls `libProcessDataWristsQuat.so` through the Python wrapper,
-5. emits an 18-feature `float32` vector to the classifier.
-
-### Classification
-
-`StereotipyClassifier` consumes the 18-feature vector and calls:
-
-```text
-libPredictPericolosaWristsQuat.so
-```
-
-It produces an event containing:
-
-- unique event ID,
-- timestamp,
-- source,
-- feature vector,
-- `stereotipy_tag`.
-
-Classification labels:
-
-```text
-0 → NO_CLASS
-1 → NON_DANGEROUS
-2 → DANGEROUS
-3 → NON_STEREOTIPY
-```
-
-The classifier enqueues events in the shared event queue. If the queue is full, the oldest item is dropped before the newest event is inserted.
-
----
-
-## Video Pipeline
-
-The current video pipeline has two DPU-backed stages:
-
-```text
-YOLO DPU Thread   → person detection
-MoveNet DPU Thread → pose keypoints and wrist-to-face proximity
-```
-
-Both video threads are created and started by `main.py`. They load their DPU models and then remain idle until activated by the dispatcher.
-
-### YOLO
-
-Implemented in:
-
-```bash
-VIDEO_pipeline/YOLO/yolo_thread.py
-```
-
-YOLO responsibilities:
-
-- load the configured YOLO `.xmodel`,
-- create the XIR graph and VART runner,
-- open the camera only while active,
-- run YOLO inference,
-- postprocess detections,
-- store the latest person-detection result,
-- store the latest annotated frame for the dashboard,
-- deactivate after a no-person timeout.
-
-The dashboard owns display. YOLO does not create its own OpenCV window unless `debug_window=True`.
-
-### MoveNet
-
-Implemented in:
-
-```bash
-VIDEO_pipeline/MOVENET/movenet_thread.py
-```
-
-MoveNet responsibilities:
-
-- load the configured MoveNet `.xmodel`,
-- create the XIR graph and VART runner,
-- open the camera only while active,
-- run keypoint inference,
-- decode heatmaps and offsets,
-- draw keypoints and skeleton lines,
-- store the latest pose frame for the dashboard,
-- compute wrist-to-face proximity.
-
-The proximity check uses the nose and shoulder width:
-
-```text
-wrist_to_nose_distance / shoulder_width
-```
-
-The default threshold is `0.45`. If either visible wrist is within the normalized threshold, the status is `True` unless `require_both_wrists=True` is used.
-
----
-
-## Event System
-
-The event queue is shared across runtime components and consumed by the dispatcher.
-
-```yaml
-event_queue_size: 1
-```
-
-A queue size of `1` intentionally favors the newest event and avoids stale classifier output. When the queue is full, the oldest item is dropped.
-
----
-
-## Event Dispatcher
-
-The dispatcher consumes events from the shared queue and coordinates video and actuation.
-
-Classification labels used by the dispatcher:
-
-```text
-0 → NO_CLASS
-1 → NON_DANGEROUS
-2 → DANGEROUS
-3 → NON_STEREOTIPY
-```
-
-Video-stage behavior:
-
-```text
-tag = 0 → stop YOLO and MoveNet
-tag = 1 → activate YOLO while tag remains 1
-tag = 2 → activate YOLO first; after person detection, switch to MoveNet
-tag = 3 → stop YOLO and MoveNet
-```
-
-YOLO and MoveNet are never active at the same time. When switching stages, the dispatcher deactivates the current video thread and waits for it to reach the idle phase before activating the next one.
-
-Actuation behavior:
-
-- only tags `1` and `2` can trigger policy actions,
-- tag changes reset the actuation cooldown,
-- repeated tags can retrigger after `ACTUATION_COOLDOWN`, currently 5 seconds,
-- actions are generated by `StereotipyActivationPolicy`,
-- actuator execution goes through `ActuatorManager.trigger(...)`.
-
-Runtime call chain:
-
-```text
-StereotipyClassifier
-        ▼
-Shared Event Queue
-        ▼
-EventDispatcher
-        ▼
-StereotipyActivationPolicy
-        ▼
-ActuatorManager.trigger(...)
-        ▼
-actuator.execute(**params)
-```
-
----
-
-## Actuation Policy
-
-`StereotipyActivationPolicy` converts stereotypy events into actuator commands.
-
-The policy tracks:
-
-- current tag,
-- current actuator,
-- number of attempts on the current actuator,
-- variation index,
-- per-actuator variation history.
-
-Configuration:
-
-```yaml
-policy:
-  attempts: 3
-```
-
-Severity mapping:
-
-```text
-1 → mild feedback
-2 → strong feedback
-```
-
-Actuator ID prefixes identify actuator families:
-
-```text
-led_      → Wi-Fi LED strip
-meta_     → BLE MetaMotion haptic actuator
-speaker_  → Bluetooth speaker
-```
-
-The policy can vary:
-
-- LED color, intensity, and speed,
-- MetaMotion vibration duty and duration,
-- speaker audio file.
-
----
-
-## Actuator Layer
-
-`ActuatorManager` handles discovery, initialization, storage, triggering, and shutdown of actuator threads.
-
-Supported actuator families:
-
-- MetaMotion BLE haptic device,
-- Bluetooth speaker,
-- Wi-Fi LED strip.
-
-The dispatcher never calls actuator-specific methods directly. It only calls:
-
-```python
-actuator_manager.trigger(
-    actuator_id=..., 
-    action_type="stereotipy_event", 
-    **params,
-)
-```
-
-Every actuator thread should expose:
-
-```python
-def execute(self, **kwargs):
-    ...
-
-def stop(self):
-    ...
-```
-
-The parameters accepted by `execute(...)` must match the parameters produced by the actuation policy.
-
----
-
-## Dashboard
-
-The dashboard is initialized before sensors and actuators. It renders the current YOLO and MoveNet thread state and owns GUI input.
-
-Important GUI rule:
-
-- Video threads should not normally call `cv2.imshow()` themselves.
-- The dashboard owns rendering.
-- Keep `debug_window=False` for YOLO and MoveNet during normal integrated runtime.
-- Press `q` in the dashboard window to terminate the system.
-
-During BlueCoin retry waits, the dashboard still renders and checks for `q`, so the user can exit even before full startup completes.
-
----
-
-## Logging
-
-The logging system supports:
-
-- system messages,
-- event logs,
-- actuation details,
-- console debugging,
-- log export under `log_base_path`.
-
-Main logging controls are defined in `config.yaml`:
-
-```yaml
-enable_system_log: true
-enable_actuation_detail: false
-debug_system_console: true
-debug_event_console: true
-log_base_path: ~/Desktop/CPSA_logs
-```
-
----
-
-## Shutdown
+### Operational Shutdown
 
 Shutdown is centralized in the `finally` block of `main.py`.
 
@@ -767,7 +418,30 @@ This order stops event production and dispatching before releasing hardware reso
 
 ---
 
-## Bluetooth and BlueST SDK Notes
+### Troubleshooting
+
+Use this section as the first place to check setup and runtime failures. Hardware, BLE, Python SDK, MetaWear, and DPU issues are intentionally grouped here so installation and diagnostics stay together.
+
+#### Common Startup Checks
+
+Before running `main.py`, verify the following:
+
+```bash
+python3 --version
+python3 -c "import yaml, numpy, cv2"
+python3 -c "import xir, vart"
+bluetoothctl list
+```
+
+Then confirm:
+
+- the DPU overlay has been loaded with `bash xmutil_load_dpu.sh`;
+- the expected BlueCoin device names in `config.yaml` match the BLE-advertised names;
+- the `.xmodel` paths in `config.yaml` point to existing files;
+- optional actuators are enabled only when the corresponding hardware is present and configured;
+- the same Python environment is used for dependency installation and for `python3 main.py`.
+
+#### Bluetooth and BlueST SDK
 
 Official BlueST SDK Python repository:
 
@@ -775,7 +449,7 @@ Official BlueST SDK Python repository:
 https://github.com/STMicroelectronics/BlueSTSDK_Python
 ```
 
-### Verify Bluetooth
+##### Verify Bluetooth
 
 ```bash
 bluetoothctl
@@ -798,7 +472,7 @@ rtl_bt/rtl8761bu_fw.bin
 rtl_bt/rtl8761a_fw.bin
 ```
 
-### Install Missing Firmware Example
+##### Install Missing Firmware Example
 
 ```bash
 sudo apt install wget
@@ -810,14 +484,14 @@ https://www.lwfinger.com/download/rtl_bt/rtl8761bu_fw.bin
 sudo reboot
 ```
 
-### BlueST SDK Dependencies
+##### BlueST SDK Dependencies
 
 ```bash
 sudo apt install python3-pip python3-distutils libglib2.0-dev
 pip install blue-st-sdk bluepy opuslib
 ```
 
-### Grant Bluetooth Permissions to bluepy
+##### Grant Bluetooth Permissions to bluepy
 
 ```bash
 sudo setcap "cap_net_raw+eip cap_net_admin+eip" \
@@ -826,7 +500,7 @@ sudo setcap "cap_net_raw+eip cap_net_admin+eip" \
 
 Do not put commas inside the quoted capability string.
 
-### Python 3.10 BlueST Compatibility Fix
+##### Python 3.10 BlueST Compatibility Fix
 
 If BlueST SDK fails because of `collections.MutableMapping`, edit:
 
@@ -846,7 +520,7 @@ To:
 class DictPutSingleElement(collection.abc.MutableMapping)
 ```
 
-### Add User to Bluetooth Group
+##### Add User to Bluetooth Group
 
 ```bash
 groups
@@ -856,8 +530,7 @@ sudo reboot
 
 ---
 
-
-## MetaWear / MetaMotion Notes
+#### MetaWear / MetaMotion
 
 This project uses MetaMotion devices as BLE haptic actuators. The Python package is installed through the MbientLab MetaWear SDK, while the runtime registers discovered MetaMotion devices under actuator IDs beginning with `meta_`.
 
@@ -873,7 +546,7 @@ Install the SDK dependency with:
 pip install metawear
 ```
 
-### PyWarble buffer overflow issue
+##### PyWarble buffer overflow issue
 
 `warble` is installed automatically as a dependency of `metawear`. On the target setup, the release build can cause a buffer overflow. Rebuilding PyWarble in debug mode resolves the issue.
 
@@ -949,7 +622,7 @@ pip list | grep warble
 
 `warble 1.2.8` should appear in the package list.
 
-### Runtime configuration
+##### Runtime configuration
 
 MetaMotion actuation is enabled and configured in `config.yaml`:
 
@@ -966,16 +639,9 @@ When enabled, `ActuatorManager` scans for MetaMotion devices, creates `MetaMotio
 
 ---
 
-## DPU / Vitis-AI Notes
+#### DPU / Vitis-AI
 
-The video pipeline requires the Xilinx runtime modules used by the Python code:
-
-```python
-import xir
-import vart
-```
-
-If these imports fail, check that the Vitis-AI / DPU runtime is installed and visible to Python.
+If the video pipeline fails on `import xir` or `import vart`, check that the Vitis-AI / DPU runtime is installed and visible to Python.
 
 A common Python path fix is:
 
@@ -984,24 +650,404 @@ echo 'export PYTHONPATH=/usr/lib/python3.10/site-packages:$PYTHONPATH' >> ~/.bas
 source ~/.bashrc
 ```
 
-Load the DPU overlay on KV260 before starting the runtime. In this project, use the repository helper script:
+Load the DPU overlay on KV260 before starting the runtime:
 
 ```bash
 bash xmutil_load_dpu.sh
 ```
 
-That script should wrap the required `xmutil loadapp ...` command and the DPU firmware path used by the deployed system. Run it once during system startup, before executing `python3 main.py`. The `DPU_FIRMWARE/` directory contains the firmware/application files required by the KV260 DPU overlay.
+Confirm the model paths in `config.yaml` point to valid `.xmodel` files.
 
-The model paths are configured in `config.yaml`:
+
+## Runtime Components
+
+This section describes the internal modules after the system has been installed and configured.
+
+### IMU Pipeline
+
+The IMU pipeline is managed by `SensorManager`.
+
+At initialization, `SensorManager`:
+
+1. loads the BlueCoin configuration,
+2. creates an `IMUSynchronizer`,
+3. creates a `StereotipyClassifier`,
+4. connects the synchronizer buffer output to the classifier recognizer,
+5. scans for BlueCoin devices,
+6. validates `bc_left` and `bc_right`,
+7. starts one `BlueCoinThread` per configured device.
+
+Each BlueCoin thread uses feature listeners for:
+
+- accelerometer,
+- gyroscope,
+- quaternion / MEMS sensor fusion.
+
+
+
+
+#### Synchronization
+
+`IMUSynchronizer` aligns the left and right wrist streams using timing constraints from `config.yaml`:
 
 ```yaml
-yolo_model_name: "/path/to/yolo_model.xmodel"
-movenet_model_name: "/path/to/movenet_model.xmodel"
+sync:
+  max_skew_ms: 30
+  stale_ms: 50
+```
+
+It waits for complete accelerometer, gyroscope, and quaternion samples from both wrists. Misaligned or stale samples are dropped to preserve real-time behavior.
+
+#### Buffering and Processing
+
+`DataBuffer` collects synchronized rows and emits sliding windows.
+
+```yaml
+buffer:
+  window_size: 150
+  overlap: 75
+```
+
+When a window is ready, the buffer:
+
+1. builds per-channel arrays,
+2. scales and converts sensor units,
+3. applies calibration behavior,
+4. calls `libProcessDataWristsQuat.so` through the Python wrapper,
+5. emits an 18-feature `float32` vector to the classifier.
+
+#### Classification
+
+`StereotipyClassifier` consumes the 18-feature vector and calls:
+
+```text
+libPredictPericolosaWristsQuat.so
+```
+
+It produces an event containing:
+
+- unique event ID,
+- timestamp,
+- source,
+- feature vector,
+- `stereotipy_tag`.
+
+Classification labels:
+
+```text
+0 → NO_CLASS
+1 → NON_DANGEROUS
+2 → DANGEROUS
+3 → NON_STEREOTIPY
+```
+
+The classifier enqueues events in the shared event queue. If the queue is full, the oldest item is dropped before the newest event is inserted.
+
+---
+
+### Video Pipeline
+
+The current video pipeline has two DPU-backed stages:
+
+```text
+YOLO DPU Thread   → person detection
+MoveNet DPU Thread → pose keypoints and wrist-to-face proximity
+```
+
+Both video threads are created and started by `main.py`. They load their DPU models and then remain idle until activated by the dispatcher.
+
+#### YOLO
+
+Implemented in:
+
+```bash
+VIDEO_pipeline/YOLO/yolo_thread.py
+```
+
+YOLO responsibilities:
+
+- load the configured YOLO `.xmodel`,
+- create the XIR graph and VART runner,
+- open the camera only while active,
+- run YOLO inference,
+- postprocess detections,
+- store the latest person-detection result,
+- store the latest annotated frame for the dashboard,
+- deactivate after a no-person timeout.
+
+The dashboard owns display. YOLO does not create its own OpenCV window unless `debug_window=True`.
+
+#### MoveNet
+
+Implemented in:
+
+```bash
+VIDEO_pipeline/MOVENET/movenet_thread.py
+```
+
+MoveNet responsibilities:
+
+- load the configured MoveNet `.xmodel`,
+- create the XIR graph and VART runner,
+- open the camera only while active,
+- run keypoint inference,
+- decode heatmaps and offsets,
+- draw keypoints and skeleton lines,
+- store the latest pose frame for the dashboard,
+- compute wrist-to-face proximity.
+
+The proximity check uses the nose and shoulder width:
+
+```text
+wrist_to_nose_distance / shoulder_width
+```
+
+The default threshold is `0.45`. If either visible wrist is within the normalized threshold, the status is `True` unless `require_both_wrists=True` is used.
+
+---
+
+### Event System and Dispatcher
+
+The event queue is shared across runtime components and consumed by the dispatcher.
+
+```yaml
+event_queue_size: 1
+```
+
+A queue size of `1` intentionally favors the newest event and avoids stale classifier output. When the queue is full, the oldest item is dropped.
+
+---
+
+The dispatcher consumes events from the shared queue and coordinates video and actuation.
+
+Classification labels used by the dispatcher:
+
+```text
+0 → NO_CLASS
+1 → NON_DANGEROUS
+2 → DANGEROUS
+3 → NON_STEREOTIPY
+```
+
+Video-stage behavior:
+
+```text
+tag = 0 → stop YOLO and MoveNet
+tag = 1 → activate YOLO while tag remains 1
+tag = 2 → activate YOLO first; after person detection, switch to MoveNet
+tag = 3 → stop YOLO and MoveNet
+```
+
+YOLO and MoveNet are never active at the same time. When switching stages, the dispatcher deactivates the current video thread and waits for it to reach the idle phase before activating the next one.
+
+Actuation behavior:
+
+- only tags `1` and `2` can trigger policy actions,
+- tag changes reset the actuation cooldown,
+- repeated tags can retrigger after `ACTUATION_COOLDOWN`, currently 5 seconds,
+- actions are generated by `StereotipyActivationPolicy`,
+- actuator execution goes through `ActuatorManager.trigger(...)`.
+
+Runtime call chain:
+
+```text
+StereotipyClassifier
+        ▼
+Shared Event Queue
+        ▼
+EventDispatcher
+        ▼
+StereotipyActivationPolicy
+        ▼
+ActuatorManager.trigger(...)
+        ▼
+actuator.execute(**params)
 ```
 
 ---
 
-## Extending the System
+### Actuation Policy and Actuator Layer
+
+`StereotipyActivationPolicy` converts stereotypy events into actuator commands.
+
+The policy tracks:
+
+- current tag,
+- current actuator,
+- number of attempts on the current actuator,
+- variation index,
+- per-actuator variation history.
+
+Configuration:
+
+```yaml
+policy:
+  attempts: 3
+```
+
+Severity mapping:
+
+```text
+1 → mild feedback
+2 → strong feedback
+```
+
+Actuator ID prefixes identify actuator families:
+
+```text
+led_      → Wi-Fi LED strip
+meta_     → BLE MetaMotion haptic actuator
+speaker_  → Bluetooth speaker
+```
+
+The policy can vary:
+
+- LED color, intensity, and speed,
+- MetaMotion vibration duty and duration,
+- speaker audio file.
+
+---
+
+`ActuatorManager` handles discovery, initialization, storage, triggering, and shutdown of actuator threads.
+
+Supported actuator families:
+
+- MetaMotion BLE haptic device,
+- Bluetooth speaker,
+- Wi-Fi LED strip.
+
+The dispatcher never calls actuator-specific methods directly. It only calls:
+
+```python
+actuator_manager.trigger(
+    actuator_id=..., 
+    action_type="stereotipy_event", 
+    **params,
+)
+```
+
+Every actuator thread should expose:
+
+```python
+def execute(self, **kwargs):
+    ...
+
+def stop(self):
+    ...
+```
+
+The parameters accepted by `execute(...)` must match the parameters produced by the actuation policy.
+
+---
+
+### Dashboard
+
+The dashboard is initialized before sensors and actuators. It renders the current YOLO and MoveNet thread state and owns GUI input.
+
+Important GUI rule:
+
+- Video threads should not normally call `cv2.imshow()` themselves.
+- The dashboard owns rendering.
+- Keep `debug_window=False` for YOLO and MoveNet during normal integrated runtime.
+- Press `q` in the dashboard window to terminate the system.
+
+During BlueCoin retry waits, the dashboard still renders and checks for `q`, so the user can exit even before full startup completes.
+
+---
+
+### Logging
+
+The logging system supports:
+
+- system messages,
+- event logs,
+- actuation details,
+- console debugging,
+- log export under `log_base_path`.
+
+Main logging controls are defined in `config.yaml`:
+
+```yaml
+enable_system_log: true
+enable_actuation_detail: false
+debug_system_console: true
+debug_event_console: true
+log_base_path: ~/Desktop/CPSA_logs
+```
+
+---
+
+## Extensions
+
+### BlueCoin Feature Listeners and Custom Features
+
+BlueCoin devices can expose more BLE features than the three currently used by CPSA. The current IMU pipeline uses accelerometer, gyroscope, and MEMS sensor-fusion/quaternion data because those are the signals required by the dual-wrist processing and classifier chain. Other BlueCoin firmware images may expose additional sensors or features, for example audio, environmental signals, activity-recognition outputs, or other custom BlueST protocol features.
+
+The official reference for the Python SDK is:
+
+```text
+https://github.com/STMicroelectronics/BlueSTSDK_Python
+```
+
+In this project, a BlueCoin feature must be represented in two places before it can become useful at runtime. First, the SDK must know how to decode the feature. Standard SDK features can be imported directly from `blue_st_sdk.features`. Missing or project-specific features should be implemented under `sensors/BLE/`, as done for:
+
+```bash
+sensors/BLE/feature_mems_sensor_fusion_compact.py
+```
+
+Second, the project must define a listener for that feature in:
+
+```bash
+sensors/BLE/feature_listeners.py
+```
+
+The listener is the bridge between BlueST notifications and the CPSA runtime. It receives values from the BlueCoin feature callback, converts them into the format expected by the rest of the system, and forwards them either to the synchronizer, the buffer/classifier chain, or directly to the event queue.
+
+The current listener pattern is:
+
+```text
+BlueCoin feature notification
+        ▼
+Feature listener
+        ▼
+Parsed values + timestamp
+        ▼
+IMUSynchronizer.update(device_id, kind, values, ts)
+```
+
+The current synchronizer accepts only these `kind` values:
+
+```text
+acc
+gyr
+quat
+```
+
+Therefore, adding a new BlueCoin feature usually requires deciding where the new signal belongs:
+
+1. If it is part of the existing dual-wrist IMU classifier input, add a listener and extend `IMUSynchronizer`, `DataBuffer`, the C processing wrapper, and the classifier input format as needed.
+2. If it is an independent signal, add a listener that creates its own event and pushes it to the shared event queue. In this case, it does not need to pass through the current IMU synchronizer.
+3. If it is only used for diagnostics or logging, the listener can log or store the value without changing the classifier pipeline.
+
+To add a new BlueCoin feature, the normal implementation path is:
+
+1. verify the feature is exposed by the BlueCoin firmware, for example with the ST BLE Sensor app or a BlueST SDK example;
+2. import or implement the feature decoder;
+3. define a matching listener in `sensors/BLE/feature_listeners.py`;
+4. update `SensorManager.initialize_sensors()` to retrieve the feature with `node.get_feature(...)`;
+5. append both the feature and its listener to the `features` and `listeners` lists passed to `BlueCoinThread`;
+6. route the decoded values to the synchronizer, event queue, logger, or another pipeline.
+
+A listener should remain lightweight. Avoid heavy processing inside the BLE notification callback. Parse values, attach a timestamp, and pass the data to the correct downstream component.
+
+The synchronized row format is:
+
+```text
+RIGHT: acc(3), gyr(3), quat(4)
+LEFT : acc(3), gyr(3), quat(4)
+```
+
+Each row contains 20 values.
 
 ### Add a New Sensor
 
