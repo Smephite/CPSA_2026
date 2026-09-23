@@ -10,6 +10,7 @@ import time
 
 import numpy as np
 
+from guardian.cascade import DetectorCascade, PoseCascade
 from guardian.predictor import Predictor
 from guardian.rules import Body, DecisionLatch, Pair, RuleEngine, combine
 from guardian.scheduler import Scheduler
@@ -19,10 +20,13 @@ from guardian.world import WorldModel
 
 
 class GuardianNode:
-    def __init__(self, cfg, clock, camera, beacon, detectors, pose, audio, robot_link, power, events,
+    def __init__(self, cfg, clock, camera, beacon, detectors, poses, audio, robot_link, power, events,
                  caption=None):
+        """detectors / poses: model name -> model, for every name the band table and pose.models use."""
         self.cfg, self.clock, self.camera, self.beacon = cfg, clock, camera, beacon
-        self.detectors, self.pose = detectors, pose
+        self.det_cascade = DetectorCascade(cfg, detectors)
+        self.pose_cascade = PoseCascade(cfg, poses)
+        self.pose_models = cfg["pose"]["models"]
         self.audio, self.robot_link, self.power, self.events = audio, robot_link, power, events
         self.caption = caption or (lambda t: "")
         w, h = camera.frame_size
@@ -43,6 +47,7 @@ class GuardianNode:
         self.gap_prev = None                     # (t, gap) for the closing speed
         self.closing = 0.0
         self.body_gap = None
+        self.sensitive = False                   # last frame's rules were near a threshold or predicting a STOP
         self.fps, self._t_prev = 0.0, None
 
     # ---------------------------------------------------------------- helpers
@@ -61,6 +66,16 @@ class GuardianNode:
         gaps = [(self.world.gap_m(robot.box, h.box), h) for h in humans]
         gap, human = min(gaps, key=lambda g: g[0])
         return robot, human, gap
+
+    def _facing_matters(self, tr):
+        """Could `from_behind` fire for this track within the look-ahead? (needs a pose model with face points)"""
+        robot = self.tracker.robot
+        if tr.role != "human" or robot is None or "from_behind" not in self.engine.enabled:
+            return False
+        if (tr.box[2] - tr.box[0]) > self.cfg["cascade"]["lying_aspect"] * (tr.box[3] - tr.box[1]):
+            return False                         # lying: no facing direction, `from_behind` ignores it
+        gap = self.world.gap_m(robot.box, tr.box) - max(self.closing, 0.0) * self.predictor.horizon_s
+        return gap <= self.engine.c["behind_m"] + self.cfg["cascade"]["sensitivity_m"]
 
     def _fresh(self, tr, t):
         return tr.kp is not None and t - tr.kp_t <= self.pose_max_age
@@ -88,9 +103,9 @@ class GuardianNode:
         # --- detector (rate from the band schedule)
         sched = self.schedule
         if sched.detector_hz > 0 and t - self.last_det_t >= 1.0 / sched.detector_hz - 1e-6:
-            det = self.detectors[sched.detector] if sched.detector in self.detectors else next(iter(self.detectors.values()))
+            expected = [tr.box_at(t) for tr in self.tracker.confirmed()]
             t0 = time.perf_counter()
-            dets = det.detect(frame)
+            dets = self.det_cascade.detect(frame, sched.detector, expected, self.sensitive, t)
             times["det"] = (time.perf_counter() - t0) * 1e3
             self.tracker.update(dets, t)
             self.last_det_t = t
@@ -118,7 +133,8 @@ class GuardianNode:
             t0 = time.perf_counter()
             for tr in [self.tracker.robot] + self.tracker.humans:
                 if tr is not None and t - tr.kp_t >= 1.0 / sched.pose_hz - 1e-6:
-                    kp = self.pose.estimate(frame, tr.box_at(t))
+                    kp = self.pose_cascade.estimate(frame, tr.box_at(t), self.pose_models,
+                                                    self._facing_matters(tr), self.sensitive)
                     self.tracker.observe_pose(tr.id, kp, t)
                     self.predictor.observe(tr.id, t, kp)
             times["pose"] = (time.perf_counter() - t0) * 1e3
@@ -127,6 +143,7 @@ class GuardianNode:
         t0 = time.perf_counter()
         dangers, future = [], {}
         self.body_gap = None
+        sensitive = False
         robot = self.tracker.robot
         if tracking and robot is not None and self._fresh(robot, t):
             m_per_px = self.world.m_per_px(robot.box)
@@ -149,9 +166,11 @@ class GuardianNode:
                     hk, hb = Predictor.future(human.kp, human.box, h_vel, human.vel, dt)
                     fut.append((dt, Pair(self._body(robot, rk, rb), self._body(human, hk, hb), m_per_px,
                                          self.world.gap_m(rb, hb), self.engine.lines_px)))
+                sensitive |= self.engine.near_threshold(now, self.cfg["cascade"]["sensitivity_m"])
                 for d in self.engine.evaluate(now, fut):
                     d.human_id = human.id
                     dangers.append(d)
+        self.sensitive = sensitive or any(d.predicted > d.level_now for d in dangers)
         times["rules"] = (time.perf_counter() - t0) * 1e3
 
         raw = combine(dangers)
@@ -177,7 +196,7 @@ class GuardianNode:
             self.predictor.reset()
             self.scheduler.reset()
             self.latch.reset()
-            self.gap_prev, self.closing, self.body_gap = None, 0.0, None
+            self.gap_prev, self.closing, self.body_gap, self.sensitive = None, 0.0, None, False
             self.schedule = self.scheduler.update(None)
             self._set_state(NodeState.IDLE, t)
             self.robot_link.update(Level.NONE, "")
@@ -196,6 +215,7 @@ class GuardianNode:
             "tracks": list(self.tracker.tracks.values()), "level": level, "rules": self.latch.rules.get(level, ()),
             "dangers": dangers, "future": future, "gap_m": pair[2] if pair else None,
             "body_gap_m": self.body_gap,
+            "cascade": {"det": self.det_cascade, "pose": self.pose_cascade},
             "pair_human": pair[1] if pair else None, "closing_mps": self.closing if pair else None,
             "m_per_px": self.world.m_per_px(robot.box) if robot is not None else None,
             "power_w": self.power.read(), "times": times, "fps": self.fps, "caption": self.caption(t),

@@ -280,14 +280,20 @@ class Dashboard:
 
         x = 620
         put(out, "rates", (x, y0 + 30), 0.55, MUTED)
+        casc = snap.get("cascade") or {}
         if sched is not None and state != NodeState.IDLE:
-            put(out, f"{sched.detector} @ {sched.detector_hz:g} Hz", (x, y0 + 58), 0.5, TEXT)
-            put(out, f"movenet @ {sched.pose_hz:g} Hz", (x, y0 + 82), 0.5, TEXT)
+            for i, (key, hz) in enumerate((("det", sched.detector_hz), ("pose", sched.pose_hz))):
+                c, y = casc.get(key), y0 + 56 + 42 * i
+                stage, why = c.last if c is not None and c.last[0] else ("-", ())
+                put(out, f"{key} {stage} @ {hz:g} Hz", (x, y), 0.5, TEXT)
+                if c is not None and len(c.calls) > 1:
+                    put(out, f"cheap {c.cheap_share():.0%}" + (f"  ({why[0]})" if why else ""), (x + 12, y + 18),
+                        0.42, MUTED)
         else:
             put(out, "no inference", (x, y0 + 58), 0.5, TEXT)
-        put(out, f"{snap.get('fps', 0):.1f} fps", (x, y0 + 110), 0.5, TEXT)
         tm = snap.get("times") or {}
-        put(out, "  ".join(f"{k} {v:.0f}" for k, v in tm.items()), (x, y0 + 136), 0.42, MUTED)
+        put(out, f"{snap.get('fps', 0):.1f} fps  " + "  ".join(f"{k} {v:.0f}" for k, v in tm.items()),
+            (x, y0 + 150), 0.42, MUTED)
 
         self._power(out, snap, 900, y0 + 16, self.w - 920, self.h - y0 - 32)
 

@@ -103,13 +103,25 @@ class MoveNetPose:
 DETECTORS = {"yolov3_voc": YoloV3VocDetector}
 
 
+POSES = {"movenet": MoveNetPose}
+
+
+def detector_names(cfg):
+    """Every detector the band table uses (single names and cascade lists)."""
+    names = set()
+    for r in cfg["bands"]["rates"].values():
+        names.update([r["detector"]] if isinstance(r["detector"], str) else r["detector"])
+    return names
+
+
 def build(cfg):
-    """-> (models, {detector_name: Detector}, PoseEstimator) for every detector named in the band table."""
-    models = DpuModels()
-    names = {r["detector"] for r in cfg["bands"]["rates"].values()}
-    unknown = names - set(DETECTORS)
+    """-> (models, {detector_name: Detector}, {pose_name: PoseEstimator}) for every model the config names."""
+    names, pose_names = detector_names(cfg), set(cfg["pose"]["models"])
+    unknown = sorted(names - set(DETECTORS)) + sorted(pose_names - set(POSES))
     if unknown:
-        raise ValueError(f"no DPU detector implemented for {sorted(unknown)} (have {sorted(DETECTORS)})")
+        raise ValueError(f"no DPU backend implemented for {unknown} (have {sorted(DETECTORS) + sorted(POSES)})")
+    models = DpuModels()
     detectors = {n: DETECTORS[n](models.runner(n)) for n in names}
-    pose = MoveNetPose(models.runner("movenet"), margin=(cfg["pose"]["crop_margin_x"], cfg["pose"]["crop_margin_y"]))
-    return models, detectors, pose
+    margin = (cfg["pose"]["crop_margin_x"], cfg["pose"]["crop_margin_y"])
+    poses = {n: POSES[n](models.runner(n), margin=margin) for n in pose_names}
+    return models, detectors, poses

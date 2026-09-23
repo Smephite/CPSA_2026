@@ -27,7 +27,7 @@ DEFAULTS = {
         "close_m": 1.5,
         "hysteresis_m": 0.2,
         "fast_closing_mps": 0.8,     # closing faster than this -> one band closer
-        "rates": {                   # per band: which detector, detector rate, pose rate (Hz)
+        "rates": {                   # per band: detector (one name, or a cascade list cheapest first), rates (Hz)
             "detect":   {"detector": "yolov3_voc", "detector_hz": 3.0, "pose_hz": 0.0},
             "far":      {"detector": "yolov3_voc", "detector_hz": 2.0, "pose_hz": 0.0},
             "approach": {"detector": "yolov3_voc", "detector_hz": 2.0, "pose_hz": 5.0},
@@ -39,6 +39,15 @@ DEFAULTS = {
         "crop_margin_y": 0.12,
         "min_score": 0.3,            # keypoint counts as visible at or above this score
         "max_age_s": 0.5,            # rules ignore poses older than this
+        "models": ["movenet"],       # pose model, or a cascade list cheapest first (e.g. spnet, movenet)
+    },
+    "cascade": {                     # when a cheap stage is trusted (see guardian/cascade.py)
+        "accept_score": 0.6,         # cheap detections below this escalate
+        "lying_aspect": 1.2,         # box width / height above this: pedestrian-trained detectors unreliable
+        "watchdog_s": 1.0,           # the last detector stage runs at least this often
+        "upright_aspect": 0.8,       # cheap pose only for boxes narrower than this (w / h)
+        "accept_kp": 0.5,            # mean confidence of the body joints needed to keep a cheap pose
+        "sensitivity_m": 0.2,        # a rule this close to its threshold escalates both cascades
     },
     "predictor": {
         "window_s": 0.6,             # history used to fit joint velocities

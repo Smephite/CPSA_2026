@@ -45,7 +45,33 @@ def parse_args(argv=None):
     p.add_argument("--no-audio", action="store_true")
     p.add_argument("--power", action="store_true", help="read the board's power rails (pynq)")
     p.add_argument("--no-log", action="store_true", help="do not write the upstream system log / event diary")
+    p.add_argument("--cascade", action="store_true",
+                   help="low -> high fidelity cascades (survey models; replay stand-ins on the laptop, see DEMO_CASCADE)")
     return p.parse_args(argv)
+
+
+# Survey recommendation (docs/model_survey.md) as cascades. On the board these need their DPU backends first.
+DEMO_CASCADE = {
+    "bands": {"rates": {band: {"detector": ["refinedet_096", "ofa_yolo_05"]}
+                        for band in ("detect", "far", "approach", "close")}},
+    "pose": {"models": ["spnet", "movenet"]},
+}
+
+
+def replay_models(cfg, frame_w):
+    """Replay stand-ins for every configured model: the cheap variant for all but the last stage of a cascade."""
+    from guardian.perception.replay import CheapReplayDetector, CheapReplayPose, ReplayDetector, ReplayPose  # noqa
+    full, cheap = ReplayDetector(box_noise_px=1.5), CheapReplayDetector(frame_w=frame_w)
+    detectors = {}
+    for r in cfg["bands"]["rates"].values():
+        names = [r["detector"]] if isinstance(r["detector"], str) else r["detector"]
+        for n in names[:-1]:
+            detectors.setdefault(n, cheap)
+        detectors[names[-1]] = full
+    names = cfg["pose"]["models"]
+    poses = {n: CheapReplayPose() for n in names[:-1]}
+    poses[names[-1]] = ReplayPose(kp_noise_px=1.5)
+    return detectors, poses
 
 
 def build(args, cfg):
@@ -70,25 +96,22 @@ def build(args, cfg):
     models = None
     if backend == "dpu":
         from guardian.perception import dpu   # noqa: PLC0415 (board only)
-        models, detectors, pose = dpu.build(cfg)
+        models, detectors, poses = dpu.build(cfg)
     else:
-        from guardian.perception.replay import ReplayDetector, ReplayPose   # noqa: PLC0415
-        det = ReplayDetector(box_noise_px=1.5)
-        detectors = {r["detector"]: det for r in cfg["bands"]["rates"].values()}
-        pose = ReplayPose(kp_noise_px=1.5)
+        detectors, poses = replay_models(cfg, camera.frame_size[0])
 
     events = io.EventLog(enabled=not args.no_log)
     audio = io.NullAudio() if args.no_audio or fast else io.AudioOut(cfg, log=events.system)
     power = io.PynqRailsPower(cfg["power"]["rails"]) if args.power else io.NullPower()
     caption = (lambda t: f"scenario t={t:5.1f}s  {scenario.beat(t)}") if scenario else None
-    node = GuardianNode(cfg, clock, camera, beacon, detectors, pose, audio, io.LogRobotLink(events.system),
+    node = GuardianNode(cfg, clock, camera, beacon, detectors, poses, audio, io.LogRobotLink(events.system),
                         power, events, caption=caption)
     return node, beacon, scenario, models, events
 
 
 def main(argv=None):
     args = parse_args(argv)
-    cfg = gcfg.load()
+    cfg = gcfg.load(DEMO_CASCADE if args.cascade else None)
     if args.no_audio:
         cfg["audio"]["enabled"] = False
     node, beacon, scenario, models, events = build(args, cfg)

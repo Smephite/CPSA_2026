@@ -22,13 +22,26 @@ The code lives in `guardian/`, with the entry point in `guardian_main.py`. The u
 
 The predictor extrapolates joint velocities over `predictor.horizon_s`. A STOP it predicts becomes a WARN with a time to contact. STOP stays latched for `decision.stop_hold_s`.
 
+### Model cascades
+
+A band's detector, and `pose.models`, can be a list of models ordered cheapest first (`guardian/cascade.py`). A cheap result is accepted only when it is confident and agrees with the tracker. "Nobody there" is never taken on trust: a confirmed track without a matching detection escalates to the next model.
+
+The next model also runs directly, skipping the cheap one, in four cases:
+- The watchdog is due: the full detector runs at least every `cascade.watchdog_s`.
+- A rule is within `cascade.sensitivity_m` of flipping its decision, or a STOP is predicted.
+- The person is lying down.
+- `from_behind` could fire and the cheap pose model has no face points.
+
+`--cascade` runs the survey's recommendation: RefineDet-ped 0.96 before OFA-YOLO, and SPnet before MoveNet. On the laptop, stand-ins play these models. The cheap stand-ins miss lying people and have no face points. Used alone, they give a false STOP in beat 2 and lose the fallen person in beat 4 (see `tests/test_scenario.py`). With the cascade, the demo matches the full models. Estimated DPU time saved in the demo is ≈20 % for detection and ≈27 % for pose. The demo is almost all hazard, so this is a lower bound. None of these models has a DPU backend yet.
+
 ### Laptop demo (no FPGA)
 
 ```sh
 uv sync
 uv run python guardian_main.py                  # real time, MJPEG stream on http://localhost:8080/
 uv run python guardian_main.py --fast --no-audio --port 0 --record out/demo.mp4 --snapshots out/snaps
-uv run pytest -q                                # unit tests + the full scenario on a simulated clock
+uv run python guardian_main.py --fast --cascade --no-audio --port 0 --record out/demo_cascade.mp4
+uv run pytest -q                                # unit tests + the scenario (full models, cascade, cheap-only control)
 ```
 
 The synthetic scenario replays ground truth in place of the DPU models. It plays four beats:

@@ -142,15 +142,37 @@ class RuleEngine:
                 return Level.STOP
         return Level.NONE
 
-    def rule_overhead(self, p: Pair) -> Level:
-        kp = p.robot.kp
+    def load_overhead(self, kp, m_per_px):
+        """Robot wrists above its shoulders (carrying something overhead)."""
         sh = self._vis(kp, [KP["left_shoulder"], KP["right_shoulder"]])
         wr = self._vis(kp, [KP["left_wrist"], KP["right_wrist"]])
         if not sh or not wr:
-            return Level.NONE
-        tol = self.c["overhead_tol_m"] / p.m_per_px
-        overhead = kp[wr, 1].min() < kp[sh, 1].min() - tol
+            return False
+        return kp[wr, 1].min() < kp[sh, 1].min() - self.c["overhead_tol_m"] / m_per_px
+
+    def rule_overhead(self, p: Pair) -> Level:
+        overhead = self.load_overhead(p.robot.kp, p.m_per_px)
         return Level.STOP if overhead and p.gap_m <= self.c["drop_radius_m"] else Level.NONE
+
+    # ---------------------------------------------------------------- decision sensitivity
+
+    def near_threshold(self, p: Pair, band_m) -> bool:
+        """True if a distance an enabled rule compares against a threshold is within band_m of it."""
+        margins = []
+        if "reach" in self.enabled:
+            hull = self.arm_hull(p.robot.kp)
+            pts = p.human.kp[p.human.kp[:, 2] >= self.min_score, :2]
+            if hull is not None and len(pts):
+                d = min(distance_to_hull(q, hull) for q in pts) * p.m_per_px
+                margins.append(abs(d - self.c["reach_margin_m"]))
+        if "down" in self.enabled and self.is_down(p.human, p.m_per_px):
+            gap = self.body_gap_m(p)
+            margins += [abs(gap - self.c["reach_m"]), abs(gap - self.c["down_warn_m"])]
+        if "from_behind" in self.enabled and self._closing_mps(p) >= self.c["closing_min_mps"]:
+            margins.append(abs(p.gap_m - self.c["behind_m"]))
+        if "overhead" in self.enabled and self.load_overhead(p.robot.kp, p.m_per_px):
+            margins.append(abs(p.gap_m - self.c["drop_radius_m"]))
+        return bool(margins) and min(margins) < band_m
 
     # ---------------------------------------------------------------- evaluation
 
