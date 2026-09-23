@@ -87,6 +87,7 @@ class DemoScenario:
              Beat("idle_end", 32.5, 34)]
 
     HUMAN_X = 1.4
+    FALLEN_SHIFT = 0.15                                 # lying, the head would leave the frame at HUMAN_X
     ROBOT_X = [(0, -1.9), (3, -1.9), (9, -1.6), (15, 0.4), (17, 0.4), (19, 0.75), (22, -1.4), (23, -1.4),
                (28, 0.3), (40, 0.3)]
 
@@ -102,8 +103,9 @@ class DemoScenario:
             human = pose_profile(+1)                    # facing image right, away from the robot on the left
         else:
             human = pose_fallen(+1)
+        x = self.HUMAN_X - (self.FALLEN_SHIFT if t >= 22.0 else 0.0)
         out = [robot] if t >= 3.4 else []               # the robot walks in just after its beacon
-        return out + [("human", self.HUMAN_X) + human]
+        return out + [("human", x) + human]
 
     def beat(self, t):
         return next((b.name for b in self.beats if b.t0 <= t < b.t1), "")

@@ -177,7 +177,7 @@ class GuardianNode:
             self.predictor.reset()
             self.scheduler.reset()
             self.latch.reset()
-            self.gap_prev, self.closing = None, 0.0
+            self.gap_prev, self.closing, self.body_gap = None, 0.0, None
             self.schedule = self.scheduler.update(None)
             self._set_state(NodeState.IDLE, t)
             self.robot_link.update(Level.NONE, "")

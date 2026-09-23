@@ -45,3 +45,8 @@ def test_beat4_fallen_warns_then_stops(run):
     warn = first(run, Level.WARN, "down", 23.0, 30.0)
     stop = first(run, Level.STOP, "down", 23.0, 30.0)
     assert warn is not None and stop is not None and warn < stop <= 28.0
+
+
+def test_idle_after_beacon_timeout(run):
+    t_idle = next(t for t, st, _, _ in run if t > 30.0 and st == NodeState.IDLE)
+    assert 31.5 <= t_idle <= 33.0

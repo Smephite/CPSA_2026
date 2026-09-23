@@ -45,6 +45,16 @@ def draw_skeleton(img, kp, col, min_score, thick=2):
             cv2.circle(img, (int(x), int(y)), thick + 2, col, -1, cv2.LINE_AA)
 
 
+def _when(d, snap, digits):
+    """'now' for a STOP, 'in 0.8 s' for a predicted one, else how close the human is ('at 1.4 m')."""
+    if d.level_now == Level.STOP:
+        return "now"
+    if d.ttc_s is not None:
+        return f"in {d.ttc_s:.{digits}f} s"
+    h, body = snap.get("pair_human"), snap.get("body_gap_m")
+    return f"at {body:.{digits}f} m" if body is not None and h is not None and h.id == d.human_id else ""
+
+
 def camera_view(snap, min_score, engine):
     img = snap["frame"].image.copy()
     for line in engine.lines_px:
@@ -150,6 +160,13 @@ class SceneRenderer:
         if robot is not None:
             X, Z = world.floor(robot.box)
             self._floor_circle(img, X, Z, reach_m, LEVEL_COL[level], 0.28)
+        for tr in snap["tracks"]:                   # detected but no pose yet (FAR / DETECT): floor marker only
+            if tr.role and tr not in people:
+                X, Z = world.floor(tr.box)
+                col = ROBOT if tr.role == "robot" else HUMAN
+                self._floor_circle(img, X, Z, 0.25, col, 0.6)
+                p = self.project(np.array([X]), np.zeros(1), np.array([Z]))[0]
+                put(img, f"{tr.role} (no pose)", p + np.array([-40, 30]), 0.45, col)
         for tr in sorted(people, key=lambda q: -world.floor(q.box)[1]):       # far first
             J = world.joints_3d(tr.kp, tr.box)
             vis = tr.kp[:, 2] >= min_score
@@ -180,12 +197,12 @@ class SceneRenderer:
         lvl = snap["level"] if snap["level"] > Level.NONE else d.predicted
         col = LEVEL_COL[max(Level.WARN, lvl)]
         top = P[:5].mean(0) if P.shape[0] else np.array([0, 0])
-        x, y = int(top[0]) + 20, int(top[1]) - 40
+        txt = d.rule.replace("_", " ") + " " + _when(d, snap, 1)
+        tw = cv2.getTextSize(txt, FONT, 0.55, 2)[0][0]
+        x, y = min(int(top[0]) + 20, self.w - tw - 44), int(top[1]) - 40       # keep the label on screen
         tri = np.array([[x, y - 18], [x - 14, y + 6], [x + 14, y + 6]], np.int32)
         cv2.fillPoly(img, [tri], col, cv2.LINE_AA)
         put(img, "!", (x - 3, y + 3), 0.5, (20, 20, 20), 2)
-        txt = d.rule.replace("_", " ")
-        txt += " now" if d.level_now == Level.STOP else (f" in {d.ttc_s:.1f}s" if d.ttc_s is not None else "")
         put(img, txt, (x + 20, y), 0.55, col, 2)
 
 
@@ -237,7 +254,7 @@ class Dashboard:
         put(out, f"band {band}", (20, y0 + 72), 0.6, TEXT)
         gap = snap.get("gap_m")
         body = snap.get("body_gap_m")
-        put(out, (f"gap {gap:.2f} m" if gap is not None else "gap -") + (f"  body {body:.2f}" if body is not None else ""),
+        put(out, (f"gap {gap:.2f} m" if gap is not None else "gap -") + (f"  body {body:.2f}" if body is not None and gap is not None else ""),
             (20, y0 + 98), 0.55, TEXT)
         cl = snap.get("closing_mps")
         put(out, f"closing {cl:+.2f} m/s" if cl is not None else "", (20, y0 + 122), 0.55, TEXT)
@@ -251,8 +268,7 @@ class Dashboard:
         yy = y0 + 58
         for d in (snap["dangers"] or [])[:5]:
             lvl = max(d.level_now, Level.WARN if d.predicted == Level.STOP else d.predicted)
-            ttc = "now" if d.level_now == Level.STOP else (f"in {d.ttc_s:.2f} s" if d.ttc_s is not None else "")
-            put(out, f"{d.rule:<12s} {lvl.name:<5s} {ttc}", (x, yy), 0.55, LEVEL_COL[lvl], 1)
+            put(out, f"{d.rule:<12s} {lvl.name:<5s} {_when(d, snap, 2)}", (x, yy), 0.55, LEVEL_COL[lvl], 1)
             yy += 26
         if not snap["dangers"]:
             level = snap["level"]
