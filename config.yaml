@@ -38,23 +38,6 @@ led_strip:
   retry_interval: 5           # Wait time between fast retries
   retry_sleep: 60             # Wait time between subsequent retries
 
-bluecoins:
-  - id: bc_left
-    name: "CPSA_L2"
-  - id: bc_right
-    name: "CPSA_R2"
-
-# Sensors data stream parameters for sync
-sync:
-  max_skew_ms: 30         # L/R timing alignment tolerance
-  stale_ms: 50           # Drops sets of data from one wrist if it sits too long waiting for the other wrist
-
-buffer:
-  window_size: 150                        # Samples per window
-  overlap: 75                             # Overlap 50% -> 75 samples step
-  debug_print_buffer: false               # Prints buffer content (high load, 150 samples x 20 channels)
-  debug_print_features: false              # Prints feature vector
-
 policy:
   attempts: 3         # Number of attempts with the same actuator before changing it
 

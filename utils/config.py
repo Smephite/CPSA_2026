@@ -86,28 +86,6 @@ def get_speaker_config() -> dict:
 def get_led_strip_config() -> dict:
     return CONFIG.get("led_strip", {})
 
-# BLUECOIN
-def get_bluecoin_config() -> list[dict]:
-    return CONFIG.get("bluecoins", []) or []
-
-# IMU CONFIGURATION
-def get_sync_config() -> dict:
-    sync_cfg = CONFIG.get("sync", {}) or {}
-    return {
-        "max_skew_ms": int(sync_cfg.get("max_skew_ms", 25)),
-        "stale_ms": int(sync_cfg.get("stale_ms", 100)),
-    }
-
-# BUFFER CONFIGURATION
-def get_buffer_config() -> dict:
-    buff_cfg = CONFIG.get("buffer", {}) or {}
-    return {
-        "window_size": int(buff_cfg.get("window_size", 150)),
-        "overlap": int(buff_cfg.get("overlap", 75)),
-        "debug_print_buffer": bool(buff_cfg.get("debug_print_buffer", True)),
-        "debug_print_features": bool(buff_cfg.get("debug_print_features", True)),
-    }
-
 # POLICY CONFIGURATION
 def get_policy_attempts() -> int:
     policy_config = CONFIG.get("policy", {}) or {}
