@@ -4,10 +4,91 @@ CPSA_2026 is a modular Python cyber-physical system for real-time multisensory f
 
 The current runtime is centered on dual BlueCoin IMU acquisition and a staged video pipeline. IMU classification drives the event system. The dispatcher then coordinates feedback actuators and, depending on the current classification tag, activates YOLO or MoveNet DPU inference. A single dashboard owns the OpenCV GUI and displays the current video state.
 
+## Guardian Node
+
+Guardian Node is an infrastructure-side safety supervisor for a mobile robot, running on the AMD Kria KV260. A fixed camera watches the robot and nearby people, independent of the robot. A YOLO person detector gates MoveNet poses, and a deterministic rule engine decides NONE / WARN / STOP. Decisions are shown on an HDMI dashboard (camera overlay, virtual floor scene, status strip) and played as audio. The robot's beacon is simulated for now (`guardian/io.py`), and the robot link only logs its commands.
+
+The code lives in `guardian/`, with the entry point in `guardian_main.py`. The upstream IMU pipeline (`main.py`, `core/`, `actuators/`) is not used by it.
+
+### Rules
+
+| Rule | STOP when | WARN when |
+|------|-----------|-----------|
+| `reach` | a human joint is inside the robot's arm hull, dilated by `reach_margin_m` | STOP is predicted within the look-ahead |
+| `from_behind` | the robot is closing within `behind_m` of a human who faces away from it | predicted |
+| `down` | the human is lying or crouched, with a joint within `reach_m` of the robot's body | within `down_warn_m`, or predicted |
+| `pinned` | the human is between a closing robot and a configured static line | predicted |
+| `overhead` | the robot's wrists are above its shoulders, with a human within `drop_radius_m` | predicted |
+
+The predictor extrapolates joint velocities over `predictor.horizon_s`. A STOP it predicts becomes a WARN with a time to contact. STOP stays latched for `decision.stop_hold_s`.
+
+### Laptop demo (no FPGA)
+
+```sh
+uv sync
+uv run python guardian_main.py                  # real time, MJPEG stream on http://localhost:8080/
+uv run python guardian_main.py --fast --no-audio --port 0 --record out/demo.mp4 --snapshots out/snaps
+uv run pytest -q                                # unit tests + the full scenario on a simulated clock
+```
+
+The synthetic scenario replays ground truth in place of the DPU models. It plays four beats:
+
+| Beat | Time | Expected |
+|------|------|----------|
+| 1: robot passes far away | 3–9 s | DETECT, no danger |
+| 2: robot approaches from the front | 9–16 s | WARN `reach` (predicted) |
+| 3: human turns away, robot keeps closing | 16–19.5 s | STOP `from_behind` |
+| 4: robot approaches a fallen human | 23–30 s | WARN, then STOP `down` |
+
+| Beat 1 | Beat 2 |
+|---|---|
+| ![beat 1](docs/img/beat1_far.png) | ![beat 2](docs/img/beat2_front.png) |
+| **Beat 3** | **Beat 4** |
+| ![beat 3](docs/img/beat3_behind.png) | ![beat 4](docs/img/beat4_fallen_stop.png) |
+
+### Board (KV260)
+
+```sh
+./run.sh                          # sudo, PYNQ env, then: guardian_main.py --source webcam --backend dpu --hdmi
+./run.sh --power                  # also read the power rails into the dashboard
+sudo -i; source /etc/profile.d/pynq_venv.sh; python3 tools/power_experiment.py --out out/power
+```
+
+- Shut down Jupyter kernels first. Only one process may own the DPU and the webcam.
+- Only Vitis AI 2.5 xmodels load on the PYNQ-DPU 2.5 overlay.
+- `tools/power_experiment.py` follows `docs/model_survey.md` section 4.4. It writes `out/power_samples.csv` and `out/power_summary.csv`.
+
+### Configuration
+
+Defaults are in `guardian/config.py`. Override any of them in a `guardian:` section of `config.yaml`:
+
+```yaml
+guardian:
+  bands:                      # robot-human distance bands set detector and pose rates
+    far_m: 3.0
+    close_m: 1.5
+    rates:
+      close: {detector: yolov3_voc, detector_hz: 2.0, pose_hz: 15.0}
+  rules:
+    reach_m: 0.8
+    down_warn_m: 1.5
+    behind_m: 1.5
+    static_lines: [[0.9, 0.0, 0.9, 1.0]]   # walls for `pinned`, normalised image coordinates
+    enabled: [reach, from_behind, down, pinned, overhead]
+  decision: {stop_hold_s: 2.0, warn_hold_s: 1.0}
+  roles: {robot_is: leftmost}              # until the beacon reports the robot's position
+  audio: {device: "hw:0,3"}                # aplay -D device for HDMI audio (check with aplay -l)
+  display: {dp_pixel_format: rgb}          # rgb | bgr, if the HDMI colours look swapped
+  power: {rails: []}                       # pynq.get_rails() names to sum; empty = all
+```
+
+The `hw:0,3` audio device and the `rgb` pixel format have not been verified on the board yet.
+
 ---
 
 ## Table of Contents
 
+- [Guardian Node](#guardian-node)
 - [System View](#system-view)
 - [Architecture and Working Principle](#architecture-and-working-principle)
   - [Architecture](#architecture)
