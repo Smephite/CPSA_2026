@@ -4,7 +4,8 @@ Each predicate looks at one snapshot (now, or a predicted future) and returns NO
 
     reach        a human keypoint inside the robot's arm hull (shoulders, elbows, wrists) dilated by a margin
     from_behind  robot closing on a human who faces away from it
-    down         human hip at or below knee height, or lying (wide box); WARN within down_warn_m, STOP in reach
+    down         human hip at or below knee height, or lying (wide box); WARN within down_warn_m, STOP within reach_m,
+                 both measured from any human joint to the hull of all robot joints
     pinned       human between the robot and a configured static line (wall, bed, rack), robot closing
     overhead     robot wrists above its shoulders with a human inside the drop radius
 
@@ -56,6 +57,15 @@ class RuleEngine:
     def arm_hull(self, kp):
         idx = self._vis(kp, ARM_IDS)
         return convex_hull(kp[idx, :2]) if len(idx) >= 2 else None
+
+    def body_gap_m(self, p: Pair):
+        """Closest visible human joint to the hull of all visible robot joints, in metres (gap_m if none)."""
+        r = p.robot.kp[p.robot.kp[:, 2] >= self.min_score, :2]
+        h = p.human.kp[p.human.kp[:, 2] >= self.min_score, :2]
+        if not len(r) or not len(h):
+            return p.gap_m
+        hull = convex_hull(r)
+        return min(distance_to_hull(q, hull) for q in h) * p.m_per_px
 
     def _closing_mps(self, p: Pair):
         d = box_center(p.human.box) - box_center(p.robot.box)
@@ -112,9 +122,10 @@ class RuleEngine:
     def rule_down(self, p: Pair) -> Level:
         if not self.is_down(p.human, p.m_per_px):
             return Level.NONE
-        if p.gap_m <= self.c["reach_m"] or self.rule_reach(p) == Level.STOP:
+        gap = self.body_gap_m(p)
+        if gap <= self.c["reach_m"] or self.rule_reach(p) == Level.STOP:
             return Level.STOP
-        return Level.WARN if p.gap_m <= self.c["down_warn_m"] else Level.NONE
+        return Level.WARN if gap <= self.c["down_warn_m"] else Level.NONE
 
     def rule_pinned(self, p: Pair) -> Level:
         if not p.lines_px or p.gap_m > self.c["pin_gap_m"] or self._closing_mps(p) < self.c["closing_min_mps"]:
