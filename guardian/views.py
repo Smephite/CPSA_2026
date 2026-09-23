@@ -252,7 +252,12 @@ class Dashboard:
             put(out, f"{d.rule:<12s} {lvl.name:<5s} {ttc}", (x, yy), 0.55, LEVEL_COL[lvl], 1)
             yy += 26
         if not snap["dangers"]:
-            put(out, "none", (x, yy), 0.55, LEVEL_COL[Level.NONE])
+            level = snap["level"]
+            for rule in snap.get("rules", ())[:5] if level > Level.NONE else ():
+                put(out, f"{rule:<12s} {level.name:<5s} held", (x, yy), 0.55, LEVEL_COL[level], 1)
+                yy += 26
+            if level == Level.NONE or not snap.get("rules"):
+                put(out, "none", (x, yy), 0.55, LEVEL_COL[Level.NONE])
 
         x = 620
         put(out, "rates", (x, y0 + 30), 0.55, MUTED)

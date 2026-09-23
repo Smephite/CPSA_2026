@@ -132,9 +132,6 @@ class DemoScenario:
                 cv2.line(img, tuple(uv[a].astype(int)), tuple(uv[b].astype(int)), col, 7, cv2.LINE_AA)
             head = uv[[0, 3, 4]].mean(axis=0)
             cv2.circle(img, tuple(head.astype(int)), int(0.11 * self.px_per_m), col, -1, cv2.LINE_AA)
-            if name == "robot":
-                cv2.putText(img, "ROBOT", (int(head[0]) - 28, int(head[1]) - 24), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5, (30, 60, 140), 2, cv2.LINE_AA)
             pad = np.array([0.06, 0.12, 0.06, 0.03]) * self.px_per_m
             box = np.array([uv[:, 0].min() - pad[0], uv[:, 1].min() - pad[1],
                             uv[:, 0].max() + pad[2], uv[:, 1].max() + pad[3]])
