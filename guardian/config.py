@@ -44,7 +44,7 @@ DEFAULTS = {
     "cascade": {                     # when a cheap stage is trusted (see guardian/cascade.py)
         "accept_score": 0.6,         # cheap detections below this escalate
         "lying_aspect": 1.2,         # box width / height above this: pedestrian-trained detectors unreliable
-        "watchdog_s": 1.0,           # the last detector stage runs at least this often
+        "watchdog_s": 3.0,           # the last detector stage runs at least this often (robot <= ~0.6 m/s from 3 m)
         "upright_aspect": 0.8,       # cheap pose only for boxes narrower than this (w / h)
         "accept_kp": 0.5,            # mean confidence of the body joints needed to keep a cheap pose
         "sensitivity_m": 0.2,        # a rule this close to its threshold escalates both cascades

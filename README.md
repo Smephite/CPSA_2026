@@ -27,7 +27,7 @@ The predictor extrapolates joint velocities over `predictor.horizon_s`. A STOP i
 A band's detector, and `pose.models`, can be a list of models ordered cheapest first (`guardian/cascade.py`). A cheap result is accepted only when it is confident and agrees with the tracker. "Nobody there" is never taken on trust: a confirmed track without a matching detection escalates to the next model.
 
 The next model also runs directly, skipping the cheap one, in four cases:
-- The watchdog is due: the full detector runs at least every `cascade.watchdog_s`.
+- The watchdog is due: the full detector runs at least every `cascade.watchdog_s` (3 s). This catches people the cheap model never detected. It is safe while the robot closes at ≤ ≈0.6 m/s from the 3 m band.
 - A rule is within `cascade.sensitivity_m` of flipping its decision, or a STOP is predicted.
 - The person is lying down.
 - `from_behind` could fire and the cheap pose model has no face points.
