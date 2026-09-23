@@ -1,0 +1,16 @@
+[project]
+name = "guardian-node"
+version = "0.1.0"
+description = "Guardian Node: infrastructure-side safety supervisor on the Kria KV260 (fork of CPSA_2026)"
+requires-python = ">=3.10,<3.11"   # matches PYNQ's venv on the board
+dependencies = [
+    "numpy==1.26.4",                 # board: PYNQ venv pin
+    "opencv-python-headless==4.11.0.86",
+    "pyyaml>=5.4",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
