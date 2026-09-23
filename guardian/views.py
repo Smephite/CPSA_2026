@@ -222,8 +222,9 @@ class Dashboard:
             th = 14 if level == Level.STOP and int(snap["t"] * 4) % 2 == 0 else 8
             cv2.rectangle(out, (0, 0), (self.w - 1, self.ph - 1), col, th)
             label = "STOP" if level == Level.STOP else "WARNING"
-            cv2.rectangle(out, (self.w // 2 - 150, 10), (self.w // 2 + 150, 64), col, -1)
-            put(out, label, (self.w // 2 - (70 if level == Level.STOP else 105), 52), 1.4, (20, 20, 20), 3)
+            cx = self.pw // 2                                   # over the camera panel, clear of the scene title
+            cv2.rectangle(out, (cx - 150, 10), (cx + 150, 64), col, -1)
+            put(out, label, (cx - (70 if level == Level.STOP else 105), 52), 1.4, (20, 20, 20), 3)
         return out
 
     def _strip(self, out, snap):
@@ -235,7 +236,9 @@ class Dashboard:
         put(out, f"{state.name}", (20, y0 + 40), 1.0, (0, 220, 255) if state == NodeState.TRACK else TEXT, 2)
         put(out, f"band {band}", (20, y0 + 72), 0.6, TEXT)
         gap = snap.get("gap_m")
-        put(out, f"gap {gap:.2f} m" if gap is not None else "gap -", (20, y0 + 98), 0.55, TEXT)
+        body = snap.get("body_gap_m")
+        put(out, (f"gap {gap:.2f} m" if gap is not None else "gap -") + (f"  body {body:.2f}" if body is not None else ""),
+            (20, y0 + 98), 0.55, TEXT)
         cl = snap.get("closing_mps")
         put(out, f"closing {cl:+.2f} m/s" if cl is not None else "", (20, y0 + 122), 0.55, TEXT)
         b = snap.get("beacon")

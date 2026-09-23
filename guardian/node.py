@@ -42,6 +42,7 @@ class GuardianNode:
         self.last_det_t = -1e9
         self.gap_prev = None                     # (t, gap) for the closing speed
         self.closing = 0.0
+        self.body_gap = None
         self.fps, self._t_prev = 0.0, None
 
     # ---------------------------------------------------------------- helpers
@@ -125,6 +126,7 @@ class GuardianNode:
         # --- predictor + rules (every frame while tracking)
         t0 = time.perf_counter()
         dangers, future = [], {}
+        self.body_gap = None
         robot = self.tracker.robot
         if tracking and robot is not None and self._fresh(robot, t):
             m_per_px = self.world.m_per_px(robot.box)
@@ -139,6 +141,8 @@ class GuardianNode:
                 h_vel = self.predictor.velocities(human)
                 now = Pair(self._body(robot), self._body(human), m_per_px,
                            self.world.gap_m(robot.box, human.box), self.engine.lines_px)
+                if pair and human is pair[1]:
+                    self.body_gap = self.engine.body_gap_m(now)
                 fut = []
                 for dt in self.predictor.horizon():
                     rk, rb = Predictor.future(robot.kp, robot.box, r_vel, robot.vel, dt)
@@ -191,6 +195,7 @@ class GuardianNode:
             "t": t, "frame": frame, "state": self.state, "beacon": beacon, "schedule": self.schedule,
             "tracks": list(self.tracker.tracks.values()), "level": level, "rules": self.latch.rules.get(level, ()),
             "dangers": dangers, "future": future, "gap_m": pair[2] if pair else None,
+            "body_gap_m": self.body_gap,
             "pair_human": pair[1] if pair else None, "closing_mps": self.closing if pair else None,
             "m_per_px": self.world.m_per_px(robot.box) if robot is not None else None,
             "power_w": self.power.read(), "times": times, "fps": self.fps, "caption": self.caption(t),
