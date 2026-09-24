@@ -104,6 +104,8 @@ DEFAULTS = {
     },
     "power": {
         "rails": [],                 # names from pynq.get_rails() to sum; empty = all with a power sensor
+        # estimated split of the measured total (sensors/system.py): P = static + cpu_core * busy cores + dpu * busy
+        "model": {"static_w": 5.3, "cpu_core_w": 0.5, "dpu_w": 4.0},   # fitted by tools/power_calibration.py
     },
 }
 

@@ -28,7 +28,8 @@ class GuardianNode:
     MIN_VISIBLE = 0.2                            # pose / orientation only for boxes at least this much in frame
 
     def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None,
-                 orientation=None, async_detect=False):
+                 orientation=None, async_detect=False,
+                 system=None):
         """
         cfg                 settings dict (utils/settings.py)
         clock               utils.clock.RealClock or SimClock
@@ -37,6 +38,7 @@ class GuardianNode:
                             pose.models use (VIDEO_pipeline/__init__.py)
         orientation         orientation classifier (classify(frame, box) -> (label, p)), optional
         async_detect        run the detector in its own thread (live node); False = inline, deterministic
+        system              sensors.system.SystemMonitor (CPU / DPU / GPU load), optional
         actuators           actuators.ActuatorManager
         events              utils.event_log.EventLog (system log for state changes)
         caption             t -> text shown on the dashboard (scenario beat), optional
@@ -47,7 +49,7 @@ class GuardianNode:
         self.pose_cascade = PoseCascade(cfg, poses)
         self.orientation = orientation
 
-        self.power, self.actuators, self.events = power, actuators, events
+        self.power, self.system, self.actuators, self.events = power, system, actuators, events
         self.caption = caption or (lambda t: "")
         w, h = camera.frame_size
         self.world = WorldModel(cfg, w, h)
@@ -287,5 +289,7 @@ class GuardianNode:
             closing_mps=self.closing if pair else None,
             m_per_px=self.world.m_per_px(robot.box) if robot is not None else None,
             cascade={"det": self.det_cascade, "pose": self.pose_cascade},
-            power_w=self.power.read(), times=times, fps=self.fps, caption=self.caption(t),
+            power_w=self.power.read(), times=times,
+            system=self.system.read(t, sum(v for k, v in times.items() if k.endswith("_dpu"))) if self.system else None,
+            fps=self.fps, caption=self.caption(t),
         )

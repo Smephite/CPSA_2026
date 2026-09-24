@@ -10,6 +10,7 @@ from collections import deque
 import cv2
 import numpy as np
 
+from sensors.system import split_power
 from utils.geometry import dilate_polygon
 from utils.types import SKELETON, Level, NodeState
 
@@ -18,6 +19,9 @@ HUMAN = (200, 130, 40)
 LEVEL_COL = {Level.NONE: (90, 170, 60), Level.WARN: (0, 170, 255), Level.STOP: (40, 40, 230)}
 BG, PANEL, TEXT, MUTED = (24, 24, 26), (34, 35, 38), (225, 225, 225), (140, 140, 145)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+SPLIT_COL = {"static": (110, 110, 118), "cpu": (230, 160, 60), "dpu": (60, 200, 250), "gpu": (200, 90, 200),
+             "rest": (80, 80, 86)}                                    # BGR, power split bar
 
 
 def put(img, text, org, scale=0.5, col=TEXT, th=1):
@@ -302,17 +306,41 @@ class Dashboard:
         self._power(out, snap, 900, y0 + 16, self.w - 920, self.h - y0 - 32)
 
     def _power(self, out, snap, x, y, w, h):
-        p = snap.power_w
+        """Measured total power + its trace; CPU / DPU / GPU load and the estimated split (sensors/system.py)."""
+        p, load = snap.power_w, snap.system
         if p is not None:
             self.power.append(p)
         put(out, "power", (x, y + 14), 0.55, MUTED)
+        if load is not None and load.temps:
+            put(out, "  ".join(f"{k.upper()} {v:.0f}C" for k, v in load.temps.items()), (x + w - 110, y + 14), 0.42, MUTED)
+        if load is not None:
+            put(out, "CPU", (x, y + 38), 0.42, MUTED)
+            for i, c in enumerate(load.cpu):                         # one bar per core
+                bx = x + 32 + i * 16
+                cv2.rectangle(out, (bx, y + 26), (bx + 11, y + 40), (60, 60, 66), -1)
+                cv2.rectangle(out, (bx, y + 40 - int(14 * c)), (bx + 11, y + 40), SPLIT_COL["cpu"], -1)
+            cpu = sum(load.cpu) / len(load.cpu) if load.cpu else 0.0
+            put(out, f"{cpu:.0%}   DPU {load.dpu:.0%}   GPU {'off' if load.gpu == 'suspended' else load.gpu}",
+                (x + 36 + 16 * len(load.cpu), y + 38), 0.42, TEXT)
         if not self.power:
-            put(out, "n/a (no rail sensors)", (x, y + 44), 0.5, MUTED)
+            put(out, "n/a (no power sensor: --power)", (x, y + 64), 0.5, MUTED)
             return
         put(out, f"{self.power[-1]:.2f} W", (x + 70, y + 14), 0.55, TEXT)
+        parts = split_power(self.power[-1], load, self.cfg["power"]["model"]) if load is not None else None
+        top = y + 50
+        if parts is not None:                                    # stacked bar of the estimated split, then labels
+            total = max(self.power[-1], sum(max(v, 0.0) for v in parts.values()), 1e-6)
+            bx = x
+            for k, v in parts.items():
+                bw = int(w * max(v, 0.0) / total)
+                cv2.rectangle(out, (bx, top), (bx + bw, top + 10), SPLIT_COL[k], -1)
+                bx += bw
+            put(out, "est. " + "  ".join(f"{k} {v:.1f}" for k, v in parts.items() if k != "gpu" or v),
+                (x, top + 26), 0.4, MUTED)
+            top += 34
         vals = np.array(self.power)
         lo, hi = vals.min() - 0.1, vals.max() + 0.1
         xs = x + np.linspace(0, w, len(vals))
-        ys = y + h - (vals - lo) / (hi - lo) * (h - 28)
+        ys = y + h - (vals - lo) / (hi - lo) * (y + h - top - 6)
         pts = np.stack([xs, ys], 1).astype(np.int32)
         cv2.polylines(out, [pts], False, (0, 200, 160), 2, cv2.LINE_AA)

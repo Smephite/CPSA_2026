@@ -34,6 +34,7 @@ from dashboard.views import Dashboard  # noqa: E402
 from sensors.beacon import AlwaysBeacon, ManualBeacon, ScheduledBeacon  # noqa: E402
 from sensors.camera import ScenarioCamera, WebcamCamera  # noqa: E402
 from sensors.power import NullPower, board_power  # noqa: E402
+from sensors.system import SystemMonitor  # noqa: E402
 from sensors.scenario import DemoScenario  # noqa: E402
 from utils import settings as gcfg  # noqa: E402
 from utils.clock import RealClock, SimClock  # noqa: E402
@@ -115,7 +116,7 @@ def build(args, cfg):
     # --- core
     caption = (lambda t: f"scenario t={t:5.1f}s  {scenario.beat(t)}") if scenario else None
     node = GuardianNode(cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=caption,
-                        orientation=orientation, async_detect=not fast)
+                        orientation=orientation, async_detect=not fast, system=SystemMonitor())
     return node, beacon, scenario, models, events
 
 

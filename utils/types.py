@@ -111,6 +111,7 @@ class Snapshot:
     m_per_px: Optional[float] = None      # at the robot's depth
     cascade: Dict[str, Any] = field(default_factory=dict)  # "det" / "pose" -> cascade (statistics)
     power_w: Optional[float] = None
+    system: Any = None                    # sensors.system.SystemLoad: CPU / DPU / GPU busy, temperatures
     times: Dict[str, float] = field(default_factory=dict)  # stage -> ms this frame
     fps: float = 0.0
     caption: str = ""
