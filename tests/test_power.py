@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from guardian import io
+from sensors import power as io
 
 
 def _hwmon(tmp_path, name, micro_watts):

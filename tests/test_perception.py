@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from guardian.perception import movenet, yolo
+from VIDEO_pipeline.MOVENET import movenet
+from VIDEO_pipeline.YOLO import yolo
 
 
 def test_yolo_encode_decode_round_trip():

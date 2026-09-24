@@ -5,7 +5,7 @@ import threading
 
 import cv2
 
-from guardian.webui import PAGE
+from dashboard.webui import PAGE
 
 
 class MjpegSink:

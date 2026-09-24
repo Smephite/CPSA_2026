@@ -12,9 +12,9 @@ import time
 
 import numpy as np
 
-from guardian.geometry import expand_box
-from guardian.perception import movenet as mn
-from guardian.perception import yolo
+from utils.geometry import expand_box
+from VIDEO_pipeline.MOVENET import movenet as mn
+from VIDEO_pipeline.YOLO import yolo
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS = {

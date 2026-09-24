@@ -7,7 +7,7 @@ box for box. Upstream CPSA_2026 feeds BGR without letterbox and decodes only the
 import cv2
 import numpy as np
 
-from guardian.types import Detection
+from utils.types import Detection
 
 VOC_CLASSES = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
                "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa",

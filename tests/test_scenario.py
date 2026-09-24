@@ -1,26 +1,26 @@
 """End-to-end: the synthetic 4-beat demo on the simulated clock, replay perception, no outputs."""
 import pytest
 
-import guardian_main
-from guardian import config as gcfg
-from guardian.types import Level, NodeState
+import main
+from utils import settings as gcfg
+from utils.types import Level, NodeState
 
 
 def simulate(overrides=None, models=None):
-    args = guardian_main.parse_args(["--fast", "--no-log", "--no-audio", "--port", "0"])
-    node, _, scenario, _, _ = guardian_main.build(args, gcfg._merge(gcfg.DEFAULTS, overrides))
+    args = main.parse_args(["--fast", "--no-log", "--no-audio", "--port", "0"])
+    node, _, scenario, _, _ = main.build(args, gcfg._merge(gcfg.DEFAULTS, overrides))
     if models:
         node.det_cascade.models, node.pose_cascade.models = models
     node.events.echo = False
     snaps = []
     while True:
         s = node.step()
-        snaps.append((s["t"], s["state"], s["level"], tuple(s["rules"])))
-        if s["t"] >= scenario.duration:
+        snaps.append((s.t, s.state, s.level, tuple(s.rules)))
+        if s.t >= scenario.duration:
             return snaps, node
 
 
-@pytest.fixture(scope="module", params=[None, guardian_main.DEMO_CASCADE], ids=["full", "cascade"])
+@pytest.fixture(scope="module", params=[None, main.DEMO_CASCADE], ids=["full", "cascade"])
 def run(request):
     return simulate(request.param)[0]
 
@@ -60,23 +60,23 @@ def test_idle_after_beacon_timeout(run):
 
 def test_cheap_models_alone_are_unsafe():
     """Control for the cascade: the cheap stand-ins alone false-STOP in beat 2 and lose the fallen human."""
-    from guardian.perception.replay import CheapReplayDetector, CheapReplayPose
+    from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
     snaps, _ = simulate(models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
     assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is not None
     assert first(snaps, Level.STOP, "down", 23.0, 30.0) is None
 
 
 def test_cascade_uses_both_stages_for_the_right_reasons():
-    _, node = simulate(guardian_main.DEMO_CASCADE)
+    _, node = simulate(main.DEMO_CASCADE)
     assert node.det_cascade.calls["refinedet_096"] > 0 and node.pose_cascade.calls["spnet"] > 0
     assert node.pose_cascade.reasons["face needed"] > 0 and node.det_cascade.reasons["lying box"] > 0
 
 
-@pytest.mark.parametrize("overrides", [None, guardian_main.DEMO_CASCADE], ids=["full", "cascade"])
+@pytest.mark.parametrize("overrides", [None, main.DEMO_CASCADE], ids=["full", "cascade"])
 def test_sudden_motion_only_on_the_fall_and_the_robot_reversal(overrides, monkeypatch):
     """Torso acceleration crosses the threshold during the fall (21.4-22 s) and when the scripted robot reverses
     in one frame (19 s), nowhere else: walking and pose noise stay below it."""
-    import guardian.node as gn
+    import core.guardian_node as gn
     hits, orig = [], gn.GuardianNode._accel_mps2
 
     def record(self, tr):

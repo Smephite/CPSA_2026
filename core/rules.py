@@ -20,8 +20,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from guardian.geometry import box_center, convex_hull, distance_to_hull, point_segment_distance
-from guardian.types import ARM_IDS, Danger, KP, Level
+from utils.geometry import box_center, convex_hull, distance_to_hull, point_segment_distance
+from utils.types import ARM_IDS, Danger, KP, Level
 
 
 @dataclass

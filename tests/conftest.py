@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from guardian import config as gcfg
-from guardian.scenario import DemoScenario
+from utils import settings as gcfg
+from sensors.scenario import DemoScenario
 
 SCENE = DemoScenario()
 M_PER_PX = 1.0 / SCENE.px_per_m

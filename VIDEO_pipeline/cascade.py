@@ -22,7 +22,7 @@ from collections import Counter
 
 import numpy as np
 
-from guardian.geometry import box_center
+from utils.geometry import box_center
 
 BODY_IDS = list(range(5, 17))              # shoulders .. ankles: the joints the rules use
 

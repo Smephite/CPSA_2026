@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from guardian.types import SKELETON, TruthPerson
+from utils.types import SKELETON, TruthPerson
 
 # Standing, facing the camera; metres, x to the image right, y up from the floor. Person's left = image right.
 FRONT = np.array([

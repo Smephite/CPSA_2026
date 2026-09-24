@@ -115,7 +115,7 @@ def main(argv=None):
         for r in range(args.repeats):
             record("idle", r, sampler.measure("idle", r, args.duration)[0])
 
-        from guardian.perception import dpu    # noqa: PLC0415 (board only: imports pynq_dpu)
+        from VIDEO_pipeline import dpu    # noqa: PLC0415 (board only: imports pynq_dpu)
         sampler.tag = ("overlay_load", 0)
         start, t0 = len(sampler.rows), time.perf_counter()
         models = dpu.DpuModels()
@@ -151,7 +151,7 @@ def main(argv=None):
                     record(f"camera_{fps}", r, p, calls, baseline=baseline)
                 cap.release()
 
-        from guardian.types import Frame        # noqa: PLC0415
+        from utils.types import Frame        # noqa: PLC0415
         rng = np.random.default_rng(0)
         frame = Frame(image=rng.integers(0, 256, (480, 640, 3), dtype=np.uint8), t=0.0)
         box = np.array([220.0, 60.0, 420.0, 460.0])

@@ -1,7 +1,7 @@
 import pytest
 
-from guardian.scheduler import Scheduler
-from guardian.types import Band
+from core.scheduler import Scheduler
+from utils.types import Band
 
 
 @pytest.fixture

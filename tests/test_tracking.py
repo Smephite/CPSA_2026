@@ -1,7 +1,7 @@
 import numpy as np
 
-from guardian.tracking import Tracker
-from guardian.types import Detection
+from VIDEO_pipeline.tracking import Tracker
+from utils.types import Detection
 
 
 def det(*box):

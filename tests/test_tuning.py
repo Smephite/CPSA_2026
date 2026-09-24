@@ -5,11 +5,11 @@ import urllib.request
 
 import pytest
 
-import guardian_main
-from guardian import config as gcfg
-from guardian import tuning as gtune
-from guardian.sinks import MjpegSink
-from guardian.types import Level
+import main
+from utils import settings as gcfg
+from dashboard import tuning as gtune
+from dashboard.sinks import MjpegSink
+from utils.types import Level
 from tests.test_scenario import first
 
 
@@ -89,11 +89,11 @@ def test_describe_shows_cascades_as_text(tune, cfg):
 
 def test_live_rule_toggle_changes_the_running_node(tmp_path):
     """Switching `reach` off mid-run (before beat 2) removes its warning; tracks survive the reconfigure."""
-    args = guardian_main.parse_args(["--fast", "--no-log", "--no-audio", "--port", "0", "--tuning", ""])
-    cfg, base = guardian_main.configs(args)
-    node, _, scenario, _, _ = guardian_main.build(args, cfg)
+    args = main.parse_args(["--fast", "--no-log", "--no-audio", "--port", "0", "--tuning", ""])
+    cfg, base = main.configs(args)
+    node, _, scenario, _, _ = main.build(args, cfg)
     node.events.echo = False
-    t = guardian_main.make_tuning(args, node, base, lambda m: None)
+    t = main.make_tuning(args, node, base, lambda m: None)
     snaps, staged = [], False
     while True:
         if not staged and node.clock.now() >= 10.0:
@@ -104,8 +104,8 @@ def test_live_rule_toggle_changes_the_running_node(tmp_path):
             node.reconfigure()
             assert len(node.tracker.tracks) == n_tracks
         s = node.step()
-        snaps.append((s["t"], s["state"], s["level"], tuple(s["rules"])))
-        if s["t"] >= scenario.duration:
+        snaps.append((s.t, s.state, s.level, tuple(s.rules)))
+        if s.t >= scenario.duration:
             break
     assert first(snaps, Level.WARN, "reach", 10.0, 16.0) is None
     assert first(snaps, Level.STOP, "down", 23.0, 30.0) is not None

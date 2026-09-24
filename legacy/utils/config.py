@@ -1,6 +1,5 @@
 # config.py
-# Load config.yaml (logging keys). Guardian settings: utils/settings.py.
-# Upstream's device/IMU getters: legacy/utils/config.py
+# Extract configuration variables from config.yaml file to python
 #
 # Author: Francesco Urru
 # GitHub: https://github.com/frarvo
@@ -74,3 +73,32 @@ def debug_system_console_enabled() -> bool:
 
 def debug_event_console_enabled() -> bool:
     return CONFIG.get("debug_event_console", False)
+
+# METAMOTION
+def get_metamotion_config() -> dict:
+    return CONFIG.get("metamotion", {})
+
+# SPEAKER
+def get_speaker_config() -> dict:
+    return CONFIG.get("speaker", {})
+
+# LED_STRIP
+def get_led_strip_config() -> dict:
+    return CONFIG.get("led_strip", {})
+
+# POLICY CONFIGURATION
+def get_policy_attempts() -> int:
+    policy_config = CONFIG.get("policy", {}) or {}
+    return int(policy_config.get("attempts", 5))
+
+# QUEUE SIZE
+def get_event_queue_size() -> int:
+    return int(CONFIG.get("event_queue_size", 5))
+
+# YOLO XMODEL PATH
+def get_yolo_path() -> str:
+    return str(Path(CONFIG["yolo_model_name"]).expanduser())
+
+# MOVENET XMODEL PATH
+def get_movenet_path() -> str:
+    return str(Path(CONFIG["movenet_model_name"]).expanduser())

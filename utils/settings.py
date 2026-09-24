@@ -41,7 +41,7 @@ DEFAULTS = {
         "max_age_s": 0.5,            # rules ignore poses older than this
         "models": ["movenet"],       # pose model, or a cascade list cheapest first (e.g. spnet, movenet)
     },
-    "cascade": {                     # when a cheap stage is trusted (see guardian/cascade.py)
+    "cascade": {                     # when a cheap stage is trusted (see VIDEO_pipeline/cascade.py)
         "accept_score": 0.6,         # cheap detections below this escalate
         "lying_aspect": 1.2,         # box width / height above this: pedestrian-trained detectors unreliable
         "watchdog_s": 3.0,           # the last detector stage runs at least this often (robot <= ~0.6 m/s from 3 m)

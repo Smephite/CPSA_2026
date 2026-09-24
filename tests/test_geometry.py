@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from guardian.geometry import convex_hull, distance_to_hull, point_in_polygon, point_segment_distance
+from utils.geometry import convex_hull, distance_to_hull, point_in_polygon, point_segment_distance
 
 SQUARE = np.array([[0, 0], [10, 0], [10, 10], [0, 10]], float)
 

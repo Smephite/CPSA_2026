@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from guardian.rules import Body, DecisionLatch, Pair, RuleEngine, combine
-from guardian.scenario import pose_fallen, pose_front, pose_overhead, pose_profile
-from guardian.types import Danger, Level
+from core.rules import Body, DecisionLatch, Pair, RuleEngine, combine
+from sensors.scenario import pose_fallen, pose_front, pose_overhead, pose_profile
+from utils.types import Danger, Level
 from tests.conftest import M_PER_PX, person
 
 W, H = 640, 480

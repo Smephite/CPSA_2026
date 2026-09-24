@@ -1,4 +1,7 @@
-"""The node: one loop that runs the cascade and produces a snapshot per frame for the views.
+"""GuardianNode: the coordinator (the role of upstream CPSA_2026's EventDispatcher). One call to step() = one frame.
+
+    sensors ──Frame, BeaconState──► VIDEO_pipeline ──tracks, poses──► core ──Decision──► actuators
+                                                                          └──Snapshot──► dashboard
 
     IDLE    beacon absent (for absent_timeout_s): camera released, no inference, trackers reset
     DETECT  beacon present: detector at the band's rate; poses only once a robot/human pair is APPROACH or CLOSE
@@ -10,24 +13,32 @@ import time
 
 import numpy as np
 
-from guardian.cascade import DetectorCascade, PoseCascade
-from guardian.predictor import Predictor
-from guardian.rules import Body, DecisionLatch, Pair, RuleEngine, combine
-from guardian.scheduler import Scheduler
-from guardian.tracking import Tracker
-from guardian.types import Band, Level, NodeState
-from guardian.world import WorldModel
+from VIDEO_pipeline.cascade import DetectorCascade, PoseCascade
+from core.predictor import Predictor
+from core.rules import Body, DecisionLatch, Pair, RuleEngine, combine
+from core.scheduler import Scheduler
+from VIDEO_pipeline.tracking import Tracker
+from utils.types import Band, Decision, Level, NodeState, Snapshot
+from VIDEO_pipeline.world import WorldModel
 
 
 class GuardianNode:
-    def __init__(self, cfg, clock, camera, beacon, detectors, poses, audio, robot_link, power, events,
-                 caption=None):
-        """detectors / poses: model name -> model, for every name the band table and pose.models use."""
+    def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None):
+        """
+        cfg                 settings dict (utils/settings.py)
+        clock               utils.clock.RealClock or SimClock
+        camera, beacon, power   sensors (sensors/__init__.py for their interfaces)
+        detectors, poses    model name -> Detector / PoseEstimator, for every name the band table and
+                            pose.models use (VIDEO_pipeline/__init__.py)
+        actuators           actuators.ActuatorManager
+        events              utils.event_log.EventLog (system log for state changes)
+        caption             t -> text shown on the dashboard (scenario beat), optional
+        """
         self.cfg, self.clock, self.camera, self.beacon = cfg, clock, camera, beacon
         self.det_cascade = DetectorCascade(cfg, detectors)
         self.pose_cascade = PoseCascade(cfg, poses)
 
-        self.audio, self.robot_link, self.power, self.events = audio, robot_link, power, events
+        self.power, self.actuators, self.events = power, actuators, events
         self.caption = caption or (lambda t: "")
         w, h = camera.frame_size
         self.world = WorldModel(cfg, w, h)
@@ -59,7 +70,7 @@ class GuardianNode:
         """Re-read every tunable value from self.cfg (after it was changed in place). Keeps tracks and history."""
         self.configure_self(self.cfg)
         for part in (self.world, self.tracker, self.scheduler, self.predictor, self.engine, self.latch,
-                     self.det_cascade, self.pose_cascade, self.audio):
+                     self.det_cascade, self.pose_cascade, self.actuators):
             part.configure(self.cfg)
 
     # ---------------------------------------------------------------- helpers
@@ -195,15 +206,12 @@ class GuardianNode:
         return self._snapshot(t, frame, beacon, level, dangers, future, pair, times)
 
     def _decide(self, raw, dangers, t, beacon):
+        """Latch the combined rule level and hand the decision to the actuators."""
         prev = self.latch.level
         level, rules = self.latch.update(raw, dangers, t)
-        changed = level != prev
-        if changed:
-            self.events.system(f"[decision] {prev.name} -> {level.name} {', '.join(rules)} at {t:.1f}s")
-            if level > Level.NONE:
-                self.events.event(level.name, rules)
-        self.audio.update(level, t, changed)
-        self.robot_link.update(level, beacon.robot_id)
+        decision = Decision(level=level, rules=tuple(rules), since=self.latch.since, changed=level != prev,
+                            robot_id=beacon.robot_id, dangers=dangers)
+        self.actuators.update(decision, t)
         return level
 
     def _idle(self, t, beacon):
@@ -217,7 +225,7 @@ class GuardianNode:
             self.sudden = set()
             self.schedule = self.scheduler.update(None)
             self._set_state(NodeState.IDLE, t)
-            self.robot_link.update(Level.NONE, "")
+            self.actuators.update(Decision(Level.NONE, changed=True), t)
         self.clock.sleep(0.1)
         t = self.clock.now()
         return self._snapshot(t, None, beacon, Level.NONE, [], {}, None, {})
@@ -228,13 +236,13 @@ class GuardianNode:
             self.fps = inst if not self.fps else 0.9 * self.fps + 0.1 * inst
         self._t_prev = t
         robot = self.tracker.robot
-        return {
-            "t": t, "frame": frame, "state": self.state, "beacon": beacon, "schedule": self.schedule,
-            "tracks": list(self.tracker.tracks.values()), "level": level, "rules": self.latch.rules.get(level, ()),
-            "dangers": dangers, "future": future, "gap_m": pair[2] if pair else None,
-            "body_gap_m": self.body_gap,
-            "cascade": {"det": self.det_cascade, "pose": self.pose_cascade},
-            "pair_human": pair[1] if pair else None, "closing_mps": self.closing if pair else None,
-            "m_per_px": self.world.m_per_px(robot.box) if robot is not None else None,
-            "power_w": self.power.read(), "times": times, "fps": self.fps, "caption": self.caption(t),
-        }
+        return Snapshot(
+            t=t, state=self.state, level=level, frame=frame, beacon=beacon, schedule=self.schedule,
+            tracks=list(self.tracker.tracks.values()), rules=self.latch.rules.get(level, ()),
+            dangers=dangers, future=future, pair_human=pair[1] if pair else None,
+            gap_m=pair[2] if pair else None, body_gap_m=self.body_gap,
+            closing_mps=self.closing if pair else None,
+            m_per_px=self.world.m_per_px(robot.box) if robot is not None else None,
+            cascade={"det": self.det_cascade, "pose": self.pose_cascade},
+            power_w=self.power.read(), times=times, fps=self.fps, caption=self.caption(t),
+        )

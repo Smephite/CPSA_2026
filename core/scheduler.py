@@ -10,7 +10,7 @@ does not flap. Each band names its detector, so a heavier or lighter detector ca
 from dataclasses import dataclass
 from typing import Optional
 
-from guardian.types import Band
+from utils.types import Band
 
 _KEYS = {Band.FAR: "far", Band.APPROACH: "approach", Band.CLOSE: "close"}
 

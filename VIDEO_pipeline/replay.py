@@ -5,8 +5,8 @@ Optional seeded noise makes it a bit less perfect than the truth.
 """
 import numpy as np
 
-from guardian.geometry import box_center
-from guardian.types import Detection
+from utils.geometry import box_center
+from utils.types import Detection
 
 
 class ReplayDetector:

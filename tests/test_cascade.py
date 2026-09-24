@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from guardian.cascade import DetectorCascade, PoseCascade
-from guardian.rules import Body, Pair, RuleEngine
-from guardian.scenario import pose_fallen, pose_front, pose_overhead
-from guardian.types import Detection
+from VIDEO_pipeline.cascade import DetectorCascade, PoseCascade
+from core.rules import Body, Pair, RuleEngine
+from sensors.scenario import pose_fallen, pose_front, pose_overhead
+from utils.types import Detection
 from tests.conftest import M_PER_PX, person
 
 UPRIGHT = np.array([300.0, 100.0, 380.0, 440.0])

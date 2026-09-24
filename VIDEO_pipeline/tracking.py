@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from guardian.geometry import box_center
+from utils.geometry import box_center
 
 
 def _size(box):

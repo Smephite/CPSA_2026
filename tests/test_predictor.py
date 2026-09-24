@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from guardian.predictor import TORSO, PoseHistory
+from core.predictor import TORSO, PoseHistory
 
 PX_PER_M = 141.0
 

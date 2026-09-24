@@ -10,8 +10,8 @@ from collections import deque
 import cv2
 import numpy as np
 
-from guardian.geometry import dilate_polygon
-from guardian.types import SKELETON, Level, NodeState
+from utils.geometry import dilate_polygon
+from utils.types import SKELETON, Level, NodeState
 
 ROBOT = (40, 120, 235)         # BGR
 HUMAN = (200, 130, 40)
@@ -51,27 +51,27 @@ def _when(d, snap, digits):
         return "now"
     if d.ttc_s is not None:
         return f"in {d.ttc_s:.{digits}f} s"
-    h, body = snap.get("pair_human"), snap.get("body_gap_m")
+    h, body = snap.pair_human, snap.body_gap_m
     return f"at {body:.{digits}f} m" if body is not None and h is not None and h.id == d.human_id else ""
 
 
 def camera_view(snap, min_score, engine):
-    img = snap["frame"].image.copy()
+    img = snap.frame.image.copy()
     for line in engine.lines_px:
         cv2.line(img, tuple(line[:2].astype(int)), tuple(line[2:].astype(int)), (60, 60, 200), 3)
-    for tr in snap["tracks"]:
+    for tr in snap.tracks:
         col = ROBOT if tr.role == "robot" else HUMAN if tr.role == "human" else MUTED
         x1, y1, x2, y2 = tr.box.astype(int)
         cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
         put(img, f"{tr.role or 'person'} #{tr.id}", (x1 + 3, max(14, y1 - 5)), 0.45, col, 1)
-        fresh = tr.kp is not None and snap["t"] - tr.kp_t <= 0.5
+        fresh = tr.kp is not None and snap.t - tr.kp_t <= 0.5
         if fresh:
             draw_skeleton(img, tr.kp, col, min_score)
             if tr.role == "robot":
                 hull = engine.arm_hull(tr.kp)
-                if hull is not None and snap.get("m_per_px"):
-                    ring = dilate_polygon(hull, engine.c["reach_margin_m"] / snap["m_per_px"])
-                    cv2.polylines(img, [ring.astype(np.int32)], True, LEVEL_COL[snap["level"]], 1, cv2.LINE_AA)
+                if hull is not None and snap.m_per_px:
+                    ring = dilate_polygon(hull, engine.c["reach_margin_m"] / snap.m_per_px)
+                    cv2.polylines(img, [ring.astype(np.int32)], True, LEVEL_COL[snap.level], 1, cv2.LINE_AA)
     return img
 
 
@@ -150,17 +150,17 @@ class SceneRenderer:
 
     def render(self, snap, world, min_score, reach_m):
         img = np.full((self.h, self.w, 3), BG, np.uint8)
-        people = [tr for tr in snap["tracks"] if tr.role and tr.kp is not None and snap["t"] - tr.kp_t <= 1.0]
+        people = [tr for tr in snap.tracks if tr.role and tr.kp is not None and snap.t - tr.kp_t <= 1.0]
         if people:
             self.zc = 0.8 * self.zc + 0.2 * float(np.mean([world.floor(tr.box)[1] for tr in people]))
         self._floor(img)
-        level = snap["level"]
-        by_id = {d.human_id: d for d in snap["dangers"]} if snap["dangers"] else {}
+        level = snap.level
+        by_id = {d.human_id: d for d in snap.dangers} if snap.dangers else {}
         robot = next((tr for tr in people if tr.role == "robot"), None)
         if robot is not None:
             X, Z = world.floor(robot.box)
             self._floor_circle(img, X, Z, reach_m, LEVEL_COL[level], 0.28)
-        for tr in snap["tracks"]:                   # detected but no pose yet (FAR / DETECT): floor marker only
+        for tr in snap.tracks:                   # detected but no pose yet (FAR / DETECT): floor marker only
             if tr.role and tr not in people:
                 X, Z = world.floor(tr.box)
                 col = ROBOT if tr.role == "robot" else HUMAN
@@ -170,7 +170,7 @@ class SceneRenderer:
         for tr in sorted(people, key=lambda q: -world.floor(q.box)[1]):       # far first
             J = world.joints_3d(tr.kp, tr.box)
             vis = tr.kp[:, 2] >= min_score
-            fut = snap["future"].get(tr.id)
+            fut = snap.future.get(tr.id)
             if fut is not None:
                 kp_f, box_f = fut
                 Jf = world.joints_3d(kp_f, box_f)
@@ -183,18 +183,18 @@ class SceneRenderer:
             P = self._avatar(img, J, vis, tr.role)
             if tr.role == "human" and tr.id in by_id:
                 self._danger_label(img, P, by_id[tr.id], snap)
-        if robot is not None and snap.get("gap_m") is not None and snap.get("pair_human") is not None:
-            h = snap["pair_human"]
+        if robot is not None and snap.gap_m is not None and snap.pair_human is not None:
+            h = snap.pair_human
             fa, fb = world.floor(robot.box), world.floor(h.box)
             pa = self.project(np.array([fa[0]]), np.zeros(1), np.array([fa[1]]))[0]
             pb = self.project(np.array([fb[0]]), np.zeros(1), np.array([fb[1]]))[0]
             cv2.line(img, tuple(pa.astype(int)), tuple(pb.astype(int)), (170, 170, 170), 1, cv2.LINE_AA)
-            put(img, f"{snap['gap_m']:.1f} m", (pa + pb) / 2 + np.array([-18, 18]), 0.5, (200, 200, 200))
+            put(img, f"{snap.gap_m:.1f} m", (pa + pb) / 2 + np.array([-18, 18]), 0.5, (200, 200, 200))
         put(img, "virtual scene", (12, 22), 0.55, MUTED)
         return img
 
     def _danger_label(self, img, P, d, snap):
-        lvl = snap["level"] if snap["level"] > Level.NONE else d.predicted
+        lvl = snap.level if snap.level > Level.NONE else d.predicted
         col = LEVEL_COL[max(Level.WARN, lvl)]
         top = P[:5].mean(0) if P.shape[0] else np.array([0, 0])
         txt = d.rule.replace("_", " ") + " " + _when(d, snap, 1)
@@ -225,8 +225,8 @@ class Dashboard:
 
     def render(self, snap):
         out = np.full((self.h, self.w, 3), BG, np.uint8)
-        state = snap["state"]
-        if state == NodeState.IDLE or snap.get("frame") is None:
+        state = snap.state
+        if state == NodeState.IDLE or snap.frame is None:
             cam = np.full((self.ph, self.pw, 3), (12, 12, 14), np.uint8)
             put(cam, "camera off", (self.pw // 2 - 70, self.ph // 2 - 10), 0.8, MUTED, 2)
             put(cam, "waiting for a robot beacon", (self.pw // 2 - 125, self.ph // 2 + 22), 0.55, MUTED)
@@ -236,10 +236,10 @@ class Dashboard:
         out[:self.ph, self.pw:] = self.scene.render(snap, self.world, self.min_score, self.cfg["rules"]["reach_m"])
         cv2.line(out, (self.pw, 0), (self.pw, self.ph), (70, 70, 75), 1)
         self._strip(out, snap)
-        level = snap["level"]
+        level = snap.level
         if level > Level.NONE:
             col = LEVEL_COL[level]
-            th = 14 if level == Level.STOP and int(snap["t"] * 4) % 2 == 0 else 8
+            th = 14 if level == Level.STOP and int(snap.t * 4) % 2 == 0 else 8
             cv2.rectangle(out, (0, 0), (self.w - 1, self.ph - 1), col, th)
             label = "STOP" if level == Level.STOP else "WARNING"
             cx = self.pw // 2                                   # over the camera panel, clear of the scene title
@@ -250,40 +250,40 @@ class Dashboard:
     def _strip(self, out, snap):
         y0 = self.ph
         cv2.rectangle(out, (0, y0), (self.w, self.h), PANEL, -1)
-        state = snap["state"]
-        sched = snap.get("schedule")
+        state = snap.state
+        sched = snap.schedule
         band = sched.band.name if sched is not None and sched.band is not None else "-"
         put(out, f"{state.name}", (20, y0 + 40), 1.0, (0, 220, 255) if state == NodeState.TRACK else TEXT, 2)
         put(out, f"band {band}", (20, y0 + 72), 0.6, TEXT)
-        gap = snap.get("gap_m")
-        body = snap.get("body_gap_m")
+        gap = snap.gap_m
+        body = snap.body_gap_m
         put(out, (f"gap {gap:.2f} m" if gap is not None else "gap -") + (f"  body {body:.2f}" if body is not None and gap is not None else ""),
             (20, y0 + 98), 0.55, TEXT)
-        cl = snap.get("closing_mps")
+        cl = snap.closing_mps
         put(out, f"closing {cl:+.2f} m/s" if cl is not None else "", (20, y0 + 122), 0.55, TEXT)
-        b = snap.get("beacon")
+        b = snap.beacon
         put(out, f"beacon {'on: ' + b.robot_id if b and b.present else 'off'}", (20, y0 + 150), 0.5, MUTED)
-        if snap.get("caption"):
-            put(out, snap["caption"], (20, y0 + 176), 0.5, MUTED)
+        if snap.caption:
+            put(out, snap.caption, (20, y0 + 176), 0.5, MUTED)
 
         x = 300
         put(out, "dangers", (x, y0 + 30), 0.55, MUTED)
         yy = y0 + 58
-        for d in (snap["dangers"] or [])[:5]:
+        for d in (snap.dangers or [])[:5]:
             lvl = max(d.level_now, Level.WARN if d.predicted == Level.STOP else d.predicted)
             put(out, f"{d.rule:<12s} {lvl.name:<5s} {_when(d, snap, 2)}", (x, yy), 0.55, LEVEL_COL[lvl], 1)
             yy += 26
-        if not snap["dangers"]:
-            level = snap["level"]
-            for rule in snap.get("rules", ())[:5] if level > Level.NONE else ():
+        if not snap.dangers:
+            level = snap.level
+            for rule in snap.rules[:5] if level > Level.NONE else ():
                 put(out, f"{rule:<12s} {level.name:<5s} held", (x, yy), 0.55, LEVEL_COL[level], 1)
                 yy += 26
-            if level == Level.NONE or not snap.get("rules"):
+            if level == Level.NONE or not snap.rules:
                 put(out, "none", (x, yy), 0.55, LEVEL_COL[Level.NONE])
 
         x = 620
         put(out, "rates", (x, y0 + 30), 0.55, MUTED)
-        casc = snap.get("cascade") or {}
+        casc = snap.cascade or {}
         if sched is not None and state != NodeState.IDLE:
             for i, (key, hz) in enumerate((("det", sched.detector_hz), ("pose", sched.pose_hz))):
                 c, y = casc.get(key), y0 + 56 + 42 * i
@@ -294,14 +294,14 @@ class Dashboard:
                         0.42, MUTED)
         else:
             put(out, "no inference", (x, y0 + 58), 0.5, TEXT)
-        tm = snap.get("times") or {}
-        put(out, f"{snap.get('fps', 0):.1f} fps  " + "  ".join(f"{k} {v:.0f}" for k, v in tm.items()),
+        tm = snap.times or {}
+        put(out, f"{snap.fps:.1f} fps  " + "  ".join(f"{k} {v:.0f}" for k, v in tm.items()),
             (x, y0 + 150), 0.42, MUTED)
 
         self._power(out, snap, 900, y0 + 16, self.w - 920, self.h - y0 - 32)
 
     def _power(self, out, snap, x, y, w, h):
-        p = snap.get("power_w")
+        p = snap.power_w
         if p is not None:
             self.power.append(p)
         put(out, "power", (x, y + 14), 0.55, MUTED)
