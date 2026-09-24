@@ -105,7 +105,7 @@ def build(args, cfg):
 
     events = io.EventLog(enabled=not args.no_log)
     audio = io.NullAudio() if args.no_audio or fast else io.AudioOut(cfg, log=events.system)
-    power = io.PynqRailsPower(cfg["power"]["rails"]) if args.power else io.NullPower()
+    power = io.board_power(cfg["power"]["rails"]) if args.power else io.NullPower()
     caption = (lambda t: f"scenario t={t:5.1f}s  {scenario.beat(t)}") if scenario else None
     node = GuardianNode(cfg, clock, camera, beacon, detectors, poses, audio, io.LogRobotLink(events.system),
                         power, events, caption=caption)
