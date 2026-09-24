@@ -13,11 +13,32 @@ In the demo, a person plays the robot. The beacon that says "a robot is near" is
 
 The upstream CPSA_2026 code (`main.py`, `core/`, `actuators/`, `VIDEO_pipeline/*_thread.py`) is left in place but not used. The upstream IMU pipeline was removed from the Guardian path.
 
+## Current status (2026-09-24)
+
+- **Runs live on the KV260** (`~/guardian-node`, `./run.sh --power --no-audio`): webcam → DPU → HDMI dashboard + web
+  UI, 0 errors in a 60 s run after the empty-crop fix. DETECT ≈ 18 fps (camera-bound), TRACK ≈ 16 fps.
+- All ten catalog models (7 detectors, MoveNet, Hourglass, orientation) load together and are switchable live.
+- **Last work stream: recording and sensing, for offline evaluation.**
+  1. Load display: per-core CPU, DPU busy, GPU state, PS/PL temperatures, and an *estimated* CPU / DPU power split
+     (`sensors/system.py`). The coefficients in `power.model` are placeholders until `tools/power_calibration.py`
+     runs on an idle board (Guardian stopped, ~2.5 min).
+  2. Raw clip recording with a live HDMI / web view (`record.sh` → `tools/record.py`): one webcam, two webcams
+     (`--right`, stereo, unsynchronised), or the RealSense F200's depth (`--depth`, raw `.u16`).
+     Replay through the full pipeline: `./run.sh --source video --video clip.avi [--loop | --fast]`
+     (`VideoFileCamera`, recorded frame times).
+  3. RealSense F200 colour | depth demo (`./tools/board.sh tools/depth_demo.py`).
+- **Tested on the board:** recording (webcam, F200 colour + depth), the depth demo (headless), the load monitor.
+  **Not yet:** the HDMI live view of `record.py` / `depth_demo.py`, a stereo recording, and replaying a recorded
+  clip through the DPU models.
+- **Hardware on the bench changes:** the Trust webcam (USB 2.0, YUYV only), a "GENERAL WEBCAM" (MJPEG up to 1080p)
+  and the RealSense F200 have all been plugged in at times. Check `v4l2-ctl --list-devices` before assuming
+  `/dev/video0` is the webcam you expect.
+
 ## Run and check
 
 ```sh
 uv sync                                          # Python 3.10 to match the board's PYNQ venv; numpy 1.26.4, opencv-headless 4.11
-uv run pytest -q                                 # 110 tests, ~35 s; must stay green
+uv run pytest -q                                 # 176 tests, ~25 s; must stay green
 uv run python main.py --fast --no-audio --port 0 --tuning '' --record out/demo.mp4 --snapshots out/snaps
 uv run python main.py --fast --no-audio --port 0 --tuning '' --cascade      # same demo through the model cascades
 uv run python main.py                   # real time, dashboard + tuning UI on http://localhost:8080/
@@ -37,7 +58,9 @@ Expected decisions in the fast demo (full models and `--cascade` agree within ~0
 
 Pass `--tuning ''` for reproducible runs. Otherwise `guardian_tuning.json`, written by the web UI, changes the settings.
 
-Board (not verified yet, see open work): `./run.sh` becomes root, sources the PYNQ environment and runs `main.py --source webcam --backend dpu --hdmi`. Power measurements: `tools/power_experiment.py`.
+Board: `./run.sh` becomes root, sources the PYNQ environment and runs `main.py --source webcam --backend dpu --hdmi`
+(extra flags are passed on; a later `--source` wins). `./tools/board.sh <script.py>` does the same for any script,
+`record.sh` for `tools/record.py`. Power: `tools/power_experiment.py` (protocol), `tools/power_calibration.py` (split).
 
 ## How a frame flows (`core/guardian_node.py`, `GuardianNode.step`)
 
@@ -64,13 +87,14 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 | Box | Files | Interface |
 |---|---|---|
-| `sensors/` | `camera.py`, `beacon.py`, `power.py`, `scenario.py` | `Camera.read() -> Frame`, `BeaconSource.poll(t) -> BeaconState`, `PowerMeter.read() -> W` |
+| `sensors/` | `camera.py` (Webcam, VideoFile, Depth, Scenario), `beacon.py`, `power.py`, `system.py`, `scenario.py` | `Camera.read() -> Frame`, `BeaconSource.poll(t) -> BeaconState`, `PowerMeter.read() -> W`, `SystemMonitor.read(t, dpu_ms) -> SystemLoad` |
 | `VIDEO_pipeline/` | `YOLO/yolo.py`, `MOVENET/movenet.py` (pure decoders), `dpu.py` (board), `replay.py` (laptop), `cascade.py`, `tracking.py`, `world.py` | `Detector.detect(frame)`, `PoseEstimator.estimate(frame, box)`, `Tracker`, `WorldModel` |
 | `core/` | `guardian_node.py` (per-frame loop, states; `reconfigure()`), `scheduler.py`, `predictor.py`, `rules.py` (rules, `body_gap_m`, `near_threshold`, depth gate, `combine`, `DecisionLatch`) | `GuardianNode.step() -> Snapshot`; a `Decision` per frame to the actuators |
 | `actuators/` | `actuator_manager.py`, `audio.py`, `robot_link.py`, `event_diary.py` | `update(decision, t)`, `configure(cfg)` |
 | `dashboard/` | `views.py`, `sinks.py` (MJPEG + `/api/params`, `/api/reset`; mp4; DisplayPort), `tuning.py`, `webui.py` | `Dashboard.render(snapshot) -> image`, `Sink.show(image)` |
 | `utils/` | `types.py`, `settings.py` (all defaults, one comment each), `geometry.py`, `clock.py`, `event_log.py`; upstream `config.py`, `logger.py`, `lock.py` | – |
-| top level | `main.py` (CLI, config layering `configs`, wiring `build`, `replay_models`, `DEMO_CASCADE`, loop), `run.sh`, `tools/power_experiment.py` | – |
+| top level | `main.py` (CLI, config layering `configs`, wiring `build`, `DEMO_CASCADE`, loop), `run.sh`, `record.sh` | – |
+| `tools/` | `record.py` (raw clips), `depth_demo.py`, `power_calibration.py`, `power_experiment.py`, `board.sh` | standalone scripts; reuse the boxes, not `GuardianNode` |
 
 `legacy/` holds the upstream code Guardian does not use (reference only, not runnable).
 
@@ -118,6 +142,21 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 ## Pitfalls found so far
 
+- **Power telemetry:** the KV260 has one power sensor, the INA260 (`ina260_u14`, hwmon, µW) on the SOM supply.
+  AMS gives voltages and temperatures only, the DA9130/DA9131 PMICs nothing, PYNQ's libsensors fails to start.
+  Any CPU / DPU / FPGA split is a fitted estimate: label it "est." everywhere.
+- **GPU:** Mali-400, OpenGL ES 2.0 only, no OpenCL (the `xilinx.icd` is XRT for the PL), runtime-suspended.
+  Nothing useful to offload; the dashboard render cost is better cut on the CPU (see Performance below).
+- **USB:** all four board ports share one USB 2.0 link (USB 3 devices get their own). Two YUYV webcams at 30 fps do
+  not fit: the second fails to start. At 15 fps requested, the Trust delivered ~10-11 fps and the GENERAL WEBCAM ~23.
+  Frames from two webcams are not synchronised: pair them by the recorded times.
+- **RealSense F200** (`8086:0a66`, plain UVC, no librealsense needed): colour `/dev/video0` (YUYV ≤ 1080p), depth
+  `/dev/video2` (`Z16`, 640x480, ≤ 60 fps; open with `CAP_PROP_CONVERT_RGB 0`, set the fps explicitly). The first 1-3
+  depth reads fail after opening (retried in `DepthCamera`). Range ~0.2-1.2 m, dead in sunlight: 0-2 % coverage in
+  the office scene. Depth unit 1/32 mm is from the docs, **not measured** (`depth.unit_mm`).
+- **Recording throughput:** the SD card writes ~17 MB/s; raw depth at 30 fps is 18 MB/s, so depth records at 15 fps.
+  16-bit PNG (38-120 ms/frame) and zlib (9-83 ms) were too slow on the ARM.
+
 - **Performance (profiled on the board, 2026-09-24):** the ARM was the bottleneck, not the DPU. Rules were pure-Python
   point/segment loops (226 ms per TRACK frame); now vectorised. Drawing + HDMI + JPEG (~110 ms) moved to the output
   thread; the detector to its own thread; DPU I/O is int8. Live: DETECT 7 -> 18 fps, TRACK ~2 -> ~16 fps. Next hot
@@ -163,14 +202,28 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 ## Open work
 
+**Next (from the last work stream)**
+1. Record a clip set (reach, from behind, fall, walk past; two people) with `record.sh`, replay one through the DPU
+   with `--fast` to confirm the path end to end, and check the HDMI live views of `record.py` / `depth_demo.py`.
+2. Clip labels (`rule: LEVEL t0-t1`) and an evaluation tool: replay every clip, report missed and false
+   warnings / stops, sweep one threshold. Proposed, not started.
+3. Run `tools/power_calibration.py` on an idle board and put the fit into `power.model`.
+4. Measure the F200 depth unit (object at a known distance at the crosshair).
+5. Stereo (two webcams): calibration clip with a checkerboard, then triangulate MoveNet joints to replace the
+   monocular depth: detect on the left image only, MoveNet on the matching crop in both (epipolar search),
+   `cv2.triangulatePoints`, monocular depth as fallback. ~20 cm baseline gives about ±0.2 m at 3 m.
+
 **Needs the board**
-1. Live run with YOLOv3 + MoveNet. Check HDMI colours (`display.dp_pixel_format`), the HDMI audio device for `aplay -D` (the README's `hw:0,3` is a placeholder) and the power rails.
+1. Check HDMI colours (`display.dp_pixel_format`) and the HDMI audio device for `aplay -D` (the README's `hw:0,3` is
+   a placeholder).
 2. Run `tools/power_experiment.py`. So far it has only been dry-run against a fake `pynq`.
-3. DPU backends and NumPy decoders for RefineDet-ped (prior boxes), OFA-YOLO (YOLOv5-style) and SPnet. First check output tensor layouts, DPU subgraphs per xmodel, and whether ≥ 4 runners coexist.
+3. Controlled two-person test of the `from_behind` STOPs seen in the office; robot role from the beacon instead of
+   "leftmost".
 4. Calibrate:
-   - the cascade accept thresholds and `sudden_accel_mps2`, using our own clips and real pose jitter;
-   - `camera.focal_px`, with a checkerboard.
-5. Orientation model for `from_behind`; async `execute_async` / `wait` overlap.
+   - the cascade accept thresholds and `sudden_accel_mps2`, using recorded clips and real pose jitter;
+   - `camera.focal_px`, with a checkerboard;
+   - `orientation.swap_left_right` and `pose.hourglass_gain` on real footage.
+5. Dashboard render cost (80-130 ms) and MoveNet decode (17 ms) on the ARM.
 
 **Can be done on the laptop**
 1. `from_behind`: treat missing face points as "unknown", not "facing away", and let the orientation model or the full pose decide.
