@@ -5,9 +5,11 @@ Board (root, PYNQ environment for HDMI): use ../record.sh, which sets that up:
     ./record.sh out/clips/reach_from_left.avi                  # Ctrl+C to stop
     ./record.sh out/clips/walk_past.avi --duration 30 --no-hdmi
     ./record.sh out/clips/stereo_reach.avi --index 0 --right 2     # stereo: two webcams, 15 fps requested
+    ./record.sh out/clips/close.avi --depth                         # RealSense F200: colour + depth (video2)
 
 Writes clip.avi (MJPEG, high quality) and clip.csv (frame, t: capture time in s from the start); with --right also
-clip_right.avi + clip_right.csv on the same time base. Two separate webcams are not synchronised: pair their frames
+clip_right.avi + clip_right.csv, with --depth clip_depth.u16 (raw uint16, lossless) + clip_depth.csv, all on the
+same time base. Two separate webcams are not synchronised: pair their frames
 by time. Replay (left / single camera) with
     ./run.sh --source video --video clip.avi [--loop | --fast]
 No DPU and no Guardian logic here: stop run.sh first (only one process can own the webcam and the monitor).
@@ -28,53 +30,70 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dashboard.output import OutputWorker  # noqa: E402
 from dashboard.sinks import DisplayPortSink, MjpegSink  # noqa: E402
-from dashboard.views import BG, MUTED, TEXT, put  # noqa: E402
-from sensors.camera import WebcamCamera  # noqa: E402
+from dashboard.views import BG, MUTED, TEXT, colorize_depth, put  # noqa: E402
+from sensors.camera import DepthCamera, WebcamCamera  # noqa: E402
 from utils import settings  # noqa: E402
 from utils.clock import RealClock  # noqa: E402
 
 
 class CameraRecorder:
-    """One webcam -> clip.avi + clip.csv, in its own thread (each camera delivers frames at its own pace).
-
-    Times are seconds on the shared clock since `t0`, so the frames of two cameras can be paired by time later.
+    """One camera in its own thread (each delivers frames at its own pace), saving to `path`:
+        .avi    colour, MJPEG (high quality)
+        .u16    depth, raw uint16 frames back to back (lossless; load with sensors.camera.load_depth_clip)
+        None    nothing saved (live view only)
+    plus the .csv next to it: frame, t (s on the shared clock since `t0`, to pair cameras by time), width, height.
+    `preview(image) -> BGR` turns the latest frame into something to look at (depth: colour map).
     """
 
-    def __init__(self, camera, path, t0):
+    def __init__(self, camera, path, t0, preview=None):
         self.camera, self.path, self.t0 = camera, path, t0
+        self.preview = preview or (lambda img: img)
         self.frames, self.fps, self.latest, self.error = 0, 0.0, None, None
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name=f"rec:{os.path.basename(path)}", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=f"rec:{path}", daemon=True)
 
     def start(self):
         self._thread.start()
 
     def _run(self):
-        writer, t_prev = None, None
+        video = raw = f = rows = None
+        t_prev = None
         try:
-            with open(os.path.splitext(self.path)[0] + ".csv", "w", newline="") as f:
+            if self.path is not None:
+                f = open(os.path.splitext(self.path)[0] + ".csv", "w", newline="")
                 rows = csv.writer(f)
-                rows.writerow(["frame", "t"])
-                while not self._stop.is_set():
-                    frame = self.camera.read()
-                    if writer is None:
-                        h, w = frame.image.shape[:2]
-                        writer = cv2.VideoWriter(self.path, cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (w, h))
-                        writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 95)
-                        if not writer.isOpened():
+                rows.writerow(["frame", "t", "width", "height"])
+            while not self._stop.is_set():
+                frame = self.camera.read()
+                img = frame.image
+                h, w = img.shape[:2]
+                t = frame.t - self.t0
+                if self.path is None:
+                    pass
+                elif self.path.endswith(".u16"):
+                    raw = raw or open(self.path, "wb")
+                    raw.write(img.astype("<u2").tobytes())
+                else:
+                    if video is None:
+                        video = cv2.VideoWriter(self.path, cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (w, h))
+                        video.set(cv2.VIDEOWRITER_PROP_QUALITY, 95)
+                        if not video.isOpened():
                             raise RuntimeError(f"cannot write {self.path}")
-                    t = frame.t - self.t0
-                    writer.write(frame.image)
-                    rows.writerow([self.frames, f"{t:.4f}"])
-                    self.frames += 1
-                    if t_prev is not None and t > t_prev:
-                        self.fps = 1 / (t - t_prev) if not self.fps else 0.9 * self.fps + 0.1 / (t - t_prev)
-                    t_prev, self.latest = t, frame.image
+                    video.write(img)
+                if rows is not None:
+                    rows.writerow([self.frames, f"{t:.4f}", w, h])
+                self.frames += 1
+                if t_prev is not None and t > t_prev:
+                    self.fps = 1 / (t - t_prev) if not self.fps else 0.9 * self.fps + 0.1 / (t - t_prev)
+                t_prev, self.latest = t, img
         except Exception as e:                      # noqa: BLE001: reported by main, which stops the recording
             self.error = e
         finally:
-            if writer is not None:
-                writer.release()
+            if video is not None:
+                video.release()
+            for fh in (raw, f):
+                if fh is not None:
+                    fh.close()
             self.camera.release()
 
     def stop(self):
@@ -124,6 +143,10 @@ def main(argv=None):
     p.add_argument("--index", type=int, default=cam_cfg["index"], help="webcam /dev/videoN (the left one for stereo)")
     p.add_argument("--right", type=int, metavar="INDEX",
                    help="stereo: second webcam /dev/videoN, recorded to clip_right.avi + clip_right.csv")
+    p.add_argument("--depth", type=int, nargs="?", const=cfg["depth"]["index"], metavar="INDEX",
+                   help=f"also record depth (default /dev/video{cfg['depth']['index']}: RealSense F200) to "
+                        "clip_depth.u16 + clip_depth.csv")
+    p.add_argument("--depth-fps", type=int, default=cfg["depth"]["fps"])
     p.add_argument("--width", type=int, default=cam_cfg["width"])
     p.add_argument("--height", type=int, default=cam_cfg["height"])
     p.add_argument("--fps", type=int, default=None,
@@ -136,7 +159,8 @@ def main(argv=None):
 
     if not args.out.endswith(".avi"):
         raise SystemExit("the clip must be an .avi (MJPEG)")
-    paths = [args.out] + ([args.out[:-4] + "_right.avi"] if args.right is not None else [])
+    paths = [args.out] + ([args.out[:-4] + "_right.avi"] if args.right is not None else []) \
+        + ([args.out[:-4] + "_depth.u16"] if args.depth is not None else [])
     for path in paths:
         if os.path.exists(path) and not args.force:
             raise SystemExit(f"{path} exists (--force to overwrite)")
@@ -146,12 +170,18 @@ def main(argv=None):
     clock = RealClock()
     cameras = [WebcamCamera(clock, i, args.width, args.height, fps)
                for i in [args.index] + ([args.right] if args.right is not None else [])]
+    names = [f"video{cam.index}" + ("" if len(cameras) == 1 else (" left", " right")[i])
+             for i, cam in enumerate(cameras)]
+    previews = [None] * len(cameras)
+    if args.depth is not None:
+        d = cfg["depth"]
+        cameras.append(DepthCamera(clock, args.depth, args.width, args.height, args.depth_fps))
+        names.append(f"video{args.depth} depth")
+        previews.append(lambda z: colorize_depth(z, d["unit_mm"], d["near_m"], d["far_m"]))
     for cam in cameras:                             # open all before recording starts: fail early
         cam.open()
     t0 = clock.now()
-    recorders = [CameraRecorder(cam, path, t0) for cam, path in zip(cameras, paths)]
-    names = [f"video{cam.index}" + ("" if len(cameras) == 1 else (" left", " right")[i])
-             for i, cam in enumerate(cameras)]
+    recorders = [CameraRecorder(cam, path, t0, pv) for cam, path, pv in zip(cameras, paths, previews)]
 
     sinks = []
     if not args.no_hdmi:
@@ -175,7 +205,8 @@ def main(argv=None):
             if errors:
                 print(f"camera error, stopping: {errors[0]}")
                 break
-            output.submit({"t": t, "cams": [(n, r.latest, r.frames, r.fps) for n, r in zip(names, recorders)]})
+            output.submit({"t": t, "cams": [(n, None if r.latest is None else r.preview(r.latest), r.frames, r.fps)
+                                            for n, r in zip(names, recorders)]})
             if args.duration and t >= args.duration:
                 break
             time.sleep(1 / 15)

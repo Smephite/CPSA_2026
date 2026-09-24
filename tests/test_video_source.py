@@ -4,7 +4,9 @@ import cv2
 import numpy as np
 import pytest
 
-from sensors.camera import VideoFileCamera
+from dashboard.views import colorize_depth
+from sensors.camera import VideoFileCamera, load_depth_clip
+from tools.depth_demo import DepthView
 from tools.record import CameraRecorder, RecordView
 from utils.clock import SimClock
 from utils.types import Frame
@@ -98,3 +100,30 @@ def test_recorded_clip_replays_with_its_times(tmp_path):
     replay.open()
     got = [replay.read() for _ in range(4)]
     assert [_brightness(f) for f in got] == [0, 1, 2, 3] and np.allclose([f.t for f in got], [0, 0.1, 0.2, 0.3])
+
+
+class FakeDepth(FakeWebcam):
+    def read(self):
+        f = super().read()
+        return Frame(image=(f.image[..., 0].astype(np.uint16) * 100 + 1000), t=f.t)
+
+
+def test_depth_clip_is_lossless(tmp_path):
+    rec = CameraRecorder(FakeDepth(None, 3), str(tmp_path / "c_depth.u16"), t0=5.0)
+    rec.start()
+    rec._thread.join(timeout=5)
+    times, frames = load_depth_clip(str(tmp_path / "c_depth.u16"))
+    assert np.allclose(times, [0, 0.1, 0.2]) and frames.shape == (3, 48, 64) and frames.dtype == np.uint16
+    assert [int(f[0, 0]) for f in frames] == [1000, 5000, 9000]
+
+
+def test_depth_colours_and_demo_view():
+    unit = 1 / 32
+    z = np.zeros((480, 640), np.uint16)
+    z[:, 320:] = int(0.8 / (unit / 1e3))
+    col = colorize_depth(z, unit, 0.2, 1.5)
+    assert (col[:, :320] == 0).all() and col[:, 320:].any()
+    view = DepthView({"unit_mm": unit, "near_m": 0.2, "far_m": 1.5})
+    out = view.render({"color": np.zeros((480, 640, 3), np.uint8), "depth": z, "fps": [30.0, 30.0]})
+    assert out.shape == (720, 1280, 3)
+    assert view.render({"color": None, "depth": None, "fps": [0.0, 0.0]}).shape == (720, 1280, 3)

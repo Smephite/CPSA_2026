@@ -28,6 +28,15 @@ def put(img, text, org, scale=0.5, col=TEXT, th=1):
     cv2.putText(img, text, (int(org[0]), int(org[1])), FONT, scale, col, th, cv2.LINE_AA)
 
 
+def colorize_depth(z, unit_mm, near_m, far_m):
+    """uint16 depth (raw units) -> BGR: near = red ... far = blue (turbo), no depth = black."""
+    m = z.astype(np.float32) * (unit_mm / 1e3)
+    u8 = np.clip((far_m - m) / (far_m - near_m) * 255, 0, 255).astype(np.uint8)
+    out = cv2.applyColorMap(u8, cv2.COLORMAP_TURBO)
+    out[z == 0] = 0
+    return out
+
+
 def _fit(img, w, h):
     box = np.full((h, w, 3), BG, np.uint8)
     k = min(w / img.shape[1], h / img.shape[0])

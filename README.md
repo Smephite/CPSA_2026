@@ -60,9 +60,11 @@ The module boxes follow upstream CPSA_2026 (`sensors/`, `VIDEO_pipeline/`, `core
 main.py                   entry point: builds every box, wires them, runs the loop (like upstream main.py)
 config.yaml               site settings: logging + optional `guardian:` overrides of utils/settings.py
 run.sh                    board launcher: root + PYNQ environment + main.py --source webcam --backend dpu --hdmi
+record.sh                 board: record raw clips (tools/record.py) with a live view on HDMI
 
 sensors/                  INPUTS: what the node measures
-  camera.py               WebcamCamera (V4L2), ScenarioCamera (synthetic frames)
+  camera.py               WebcamCamera (V4L2), VideoFileCamera (recorded clips), DepthCamera (V4L2 Z16),
+                          ScenarioCamera (synthetic frames)
   beacon.py               AlwaysBeacon, ScheduledBeacon, ManualBeacon (simulated; BLE fits the same interface)
   power.py                HwmonPower (KV260 INA260 via sysfs), PynqRailsPower, NullPower
   scenario.py             DemoScenario: the four-beat demo world, with ground truth
@@ -103,8 +105,12 @@ utils/                    shared building blocks
   geometry.py, clock.py, event_log.py
   config.py, logger.py, lock.py     upstream's config.yaml loader and log files
 
-tests/                    133 tests: decoders, geometry, tracker, rules, scheduler, cascade, tuning, full scenario
+tests/                    176 tests: decoders, geometry, tracker, rules, scheduler, cascade, tuning, full scenario
 tools/power_experiment.py board power protocol (docs/model_survey.md §4.4) -> CSV
+tools/power_calibration.py fits the estimated CPU / DPU power split (settings power.model)
+tools/record.py           raw clips: webcam(s) -> .avi + .csv, RealSense depth -> .u16 + .csv
+tools/depth_demo.py       RealSense F200 colour | depth side by side, live
+tools/board.sh            runs any script as root in the PYNQ environment
 docs/                     model_survey.md (models per stage and band), img/ (reviewed demo frames)
 legacy/                   upstream CPSA_2026 code and README that Guardian does not use
 AGENTS.md                 working notes: design decisions, pitfalls, open work
@@ -147,6 +153,21 @@ git clone -b guardian-node https://github.com/Smephite/CPSA_2026.git guardian-no
 ./run.sh --power --duration 45 --snapshots out/live --snapshot-every 3 --tuning ''
 sudo systemctl start gdm          # afterwards: HDMI output stops the desktop, this brings it back
 ```
+
+Record clips, then evaluate and tune on them without a camera (paths relative to the repo):
+
+```sh
+./record.sh out/clips/reach.avi                              # raw webcam + frame times; live view on HDMI; Ctrl+C
+./record.sh out/clips/reach.avi --index 0 --right 2          # two webcams (stereo), 15 fps requested
+./record.sh out/clips/close.avi --depth                      # RealSense F200: colour + raw depth (close_depth.u16)
+./run.sh --source video --video out/clips/reach.avi --loop   # replay in real time, tune thresholds in the web UI
+./run.sh --source video --video out/clips/reach.avi --fast   # every frame, as fast as the DPU allows (repeatable)
+./tools/board.sh tools/depth_demo.py                         # F200 colour | depth side by side (HDMI + :8080)
+```
+
+Replay feeds the frames at their recorded times (a live node that falls behind drops frames, like a webcam).
+Two webcams share the board's USB 2.0 link: both run only at 15 fps (measured ~10 and ~23 fps delivered).
+The F200 sees depth at ~0.2-1.2 m only (coded light; sunlight washes it out); its unit (1/32 mm) is not yet measured.
 
 - Shut down Jupyter kernels first: only one process may own the DPU and the webcam.
 - `run.sh` becomes root and sources PYNQ's environment (`/etc/environment`, `/etc/profile.d/pynq_venv.sh`).

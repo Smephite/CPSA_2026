@@ -9,6 +9,13 @@ DEFAULTS = {
         "focal_px": 550.0,           # pinhole focal length in px (webcam ~60 deg HFOV at 640 px)
         "edge_px": 3,                # a box side this close to the frame border counts as cut off
     },
+    "depth": {                       # V4L2 16-bit depth camera (RealSense F200: /dev/video2); recording / demo only
+        "index": 2,
+        "fps": 15,                   # 30 works too, but raw depth at 30 fps (18 MB/s) outruns the board's SD card
+        "unit_mm": 1 / 32,           # mm per raw unit; F200 = 1/32 mm (from the librealsense docs, not yet measured)
+        "near_m": 0.2,               # colour scale of the depth view (F200 range ~0.2-1.2 m)
+        "far_m": 1.5,
+    },
     "person_height_m": 1.7,          # body size used to turn pixels into metres (monocular)
     "person_width_m": 0.5,           # body width, for depth when the box is cut at the top or bottom
     "beacon": {

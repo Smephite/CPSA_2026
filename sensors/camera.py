@@ -2,7 +2,10 @@
 import csv
 import os
 
+import time
+
 import cv2
+import numpy as np
 
 from utils.types import Frame
 
@@ -35,6 +38,53 @@ class WebcamCamera:
         if not ok:
             raise RuntimeError("webcam read failed")
         return Frame(image=img, t=self.clock.now())
+
+    def release(self):
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+    @property
+    def frame_size(self):
+        return self.size
+
+
+class DepthCamera:
+    """16-bit depth (V4L2 'Z16 ') from a depth camera's depth node, e.g. the RealSense F200 at /dev/video2.
+
+    read() -> Frame with image = uint16 (H, W) in raw units (settings depth.unit_mm), 0 = no depth there.
+    The F200 sometimes fails the first reads after opening: they are retried for `warmup_s`.
+    """
+
+    def __init__(self, clock, index=2, width=640, height=480, fps=15, warmup_s=2.0):
+        self.clock, self.index, self.size, self.fps, self.warmup_s = clock, index, (width, height), fps, warmup_s
+        self.cap = None
+
+    @property
+    def is_open(self):
+        return self.cap is not None
+
+    def open(self):
+        if self.cap is None:
+            cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
+            if not cap.isOpened():
+                raise RuntimeError(f"cannot open /dev/video{self.index}")
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"Z16 "))
+            cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)             # raw bytes, no colour conversion
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+            cap.set(cv2.CAP_PROP_FPS, self.fps)
+            self.size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+            self.cap, self.t_open = cap, time.monotonic()
+
+    def read(self):
+        while True:
+            ok, raw = self.cap.read()
+            if ok:
+                w, h = self.size
+                return Frame(image=np.frombuffer(raw, np.uint16, w * h).reshape(h, w).copy(), t=self.clock.now())
+            if time.monotonic() - self.t_open > self.warmup_s:
+                raise RuntimeError(f"depth read failed (/dev/video{self.index})")
 
     def release(self):
         if self.cap is not None:
@@ -149,3 +199,12 @@ class VideoFileCamera:
     @property
     def frame_size(self):
         return self.size
+
+
+def load_depth_clip(path):
+    """clip_depth.u16 from tools/record.py -> (times (N,), frames (N, H, W) uint16, memory-mapped, raw units)."""
+    with open(os.path.splitext(path)[0] + ".csv") as f:
+        rows = list(csv.DictReader(f))
+    w, h = int(rows[0]["width"]), int(rows[0]["height"])
+    frames = np.memmap(path, "<u2", "r").reshape(-1, h, w)[:len(rows)]
+    return np.array([float(r["t"]) for r in rows]), frames
