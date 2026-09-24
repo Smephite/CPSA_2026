@@ -60,6 +60,7 @@ def params(detector_specs=(), pose_specs=()):
         _f("tracker.max_age_s", 0.2, 10, 0.1, "Drop a track not observed for this long"),
         _i("tracker.min_hits", 1, 10, "Observations before a track counts"),
         _f("tracker.vel_alpha", 0.05, 1.0, 0.05, "EMA weight of a new velocity sample"),
+        _f("tracker.max_speed_bh", 0.5, 10, 0.1, "Velocity cap, body sizes per second"),
         _i("tracker.pose_min_kps", 1, 17, "Confident joints needed to move the box with the pose"),
         _f("bands.far_m", 1.0, 10, 0.1, "FAR above this robot-human gap"),
         _f("bands.close_m", 0.3, 5, 0.1, "CLOSE below this gap"),
@@ -219,6 +220,9 @@ EFFECTS = {
     "rules.facing_source": "How from_behind decides 'facing away from the robot'. auto: orientation model when it "
                            "is confident, else face keypoints. keypoints: no face points = facing away (can give "
                            "false STOPs with poses that lack face points). orientation: the model only.",
+    "tracker.max_speed_bh": "Track velocities are capped at this many body sizes per second (2 = ~3.4 m/s). Stops a "
+                            "noisy detection from flinging a predicted box across or out of the frame. Too low lags "
+                            "behind people who really run.",
     "audio.enabled": "Warning tones on the node's audio output.",
     "audio.repeat_s": "How often the tone repeats while WARN or STOP holds.",
 }

@@ -88,10 +88,25 @@ def dilate_polygon(hull, margin, n_arc=6):
 
 
 def expand_box(box, mx, my, width, height):
+    """Box grown by margins (fractions of its size), both edges clamped to the frame.
+
+    A box (partly) outside the frame, e.g. a track extrapolated past the edge, can come back with zero area.
+    """
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
-    return np.array([max(0.0, x1 - w * mx), max(0.0, y1 - h * my),
-                     min(float(width), x2 + w * mx), min(float(height), y2 + h * my)])
+    return np.array([np.clip(x1 - w * mx, 0.0, width), np.clip(y1 - h * my, 0.0, height),
+                     np.clip(x2 + w * mx, 0.0, width), np.clip(y2 + h * my, 0.0, height)])
+
+
+def visible_fraction(box, width, height):
+    """Share of the box's area inside the frame (0 when fully outside or degenerate)."""
+    x1, y1, x2, y2 = box
+    area = max(x2 - x1, 0.0) * max(y2 - y1, 0.0)
+    if area <= 0:
+        return 0.0
+    iw = max(0.0, min(x2, width) - max(x1, 0.0))
+    ih = max(0.0, min(y2, height) - max(y1, 0.0))
+    return iw * ih / area
 
 
 def box_center(box):

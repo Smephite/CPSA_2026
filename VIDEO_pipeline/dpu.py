@@ -102,10 +102,16 @@ class _DpuModel:
         return self.out
 
 
+MIN_CROP_PX = 8                          # smaller crops (e.g. a box extrapolated off the frame) are not run
+
+
 def _crop(frame, box, margin):
+    """-> (crop, x0, y0), or (None, 0, 0) when the expanded box has (almost) no area inside the frame."""
     H, W = frame.image.shape[:2]
     x0, y0, x1, y1 = expand_box(box, margin[0], margin[1], W, H).astype(int)
-    return frame.image[y0:max(y1, y0 + 1), x0:max(x1, x0 + 1)], x0, y0
+    if x1 - x0 < MIN_CROP_PX or y1 - y0 < MIN_CROP_PX:
+        return None, 0, 0
+    return frame.image[y0:y1, x0:x1], x0, y0
 
 
 # ---------------------------------------------------------------- detectors
@@ -193,6 +199,9 @@ class MoveNetPose(_DpuModel):
 
     def estimate(self, frame, box):
         crop, x0, y0 = _crop(frame, box, self.margin)
+        if crop is None:
+            self.times = {}
+            return np.zeros((17, 3), np.float32)             # nothing to see: every joint invisible
         t0 = time.perf_counter()
         u8, k, ox, oy = mn.preprocess_u8(crop, self.size, self.mean)
         x = self.prepare(u8)
@@ -217,6 +226,9 @@ class HourglassPose(_DpuModel):
 
     def estimate(self, frame, box):
         crop, x0, y0 = _crop(frame, box, self.margin)
+        if crop is None:
+            self.times = {}
+            return np.zeros((17, 3), np.float32)
         t0 = time.perf_counter()
         u8, k, ox, oy = hourglass.preprocess_u8(crop)
         x = self.prepare(u8)
@@ -240,6 +252,9 @@ class OrientationModel(_DpuModel):
 
     def classify(self, frame, box):
         crop, _, _ = _crop(frame, box, self.margin)
+        if crop is None:
+            self.times = {}
+            return None, 0.0                                    # unknown
         out = self.run(self.prepare(orientation.preprocess_u8(crop)), "orient")
         return orientation.decode(out[0][0])
 

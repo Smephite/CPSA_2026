@@ -38,3 +38,14 @@ def test_far_detection_starts_a_new_track_and_stale_tracks_drop(cfg):
     assert len(tr.tracks) == 2
     tr.update([det(560, 200, 620, 440)], t=0.1 + cfg["tracker"]["max_age_s"] + 0.1)
     assert len(tr.tracks) == 1
+
+
+def test_velocity_is_capped_at_a_human_speed(cfg):
+    from utils.types import Detection
+    tr = Tracker(cfg)
+    box = np.array([300.0, 100.0, 360.0, 350.0])                   # 250 px tall
+    tr.update([Detection(box=box, score=0.9)], 0.0)
+    jump = box + np.array([200.0, 0.0, 200.0, 0.0])                # 200 px in 0.1 s = 8 body sizes / s (noise)
+    tr.update([Detection(box=jump, score=0.9)], 0.1)
+    (track,) = tr.tracks.values()
+    assert np.linalg.norm(track.vel) <= cfg["tracker"]["max_speed_bh"] * 250 + 1e-6

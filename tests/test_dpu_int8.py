@@ -96,3 +96,24 @@ def test_int8_matches_float(name, frame):
     fix = model_q.runner.get_input_tensors()[0].get_attr("fix_point")
     ref = np.clip(np.round(seen_f.astype(np.float64) * 2.0 ** fix), -128, 127)
     assert np.abs(seen_q.astype(np.int16) - ref).max() <= 1        # int8 input = what VART would have made
+
+
+@pytest.mark.parametrize("name", ["movenet", "hourglass", "orientation"])
+@pytest.mark.parametrize("box", [[700.0, 50.0, 800.0, 400.0],      # right of the frame (live crash, 2026-09-24)
+                                 [-300.0, 50.0, -100.0, 400.0],    # left of it
+                                 [100.0, 500.0, 200.0, 600.0]])    # below it
+def test_crop_models_survive_boxes_outside_the_frame(name, box, frame):
+    out, seen, _ = run_model(name, True, frame, np.array(box))
+    assert seen is None                                           # no DPU call for an empty crop
+    if name == "orientation":
+        assert out == (None, 0.0)
+    else:
+        assert np.asarray(out).shape == (17, 3) and not np.asarray(out)[:, 2].any()
+
+
+def test_expand_box_clamps_both_edges():
+    from utils.geometry import expand_box, visible_fraction
+    b = expand_box(np.array([700.0, 50.0, 800.0, 400.0]), 0.25, 0.12, 640, 480)
+    assert b[0] == b[2] == 640                                    # zero width, not negative
+    assert visible_fraction([600, 0, 700, 100], 640, 480) == pytest.approx(0.4)
+    assert visible_fraction([700, 0, 800, 100], 640, 480) == 0.0

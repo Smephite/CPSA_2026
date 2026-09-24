@@ -76,6 +76,7 @@ class Tracker:
         self.max_age_s = c["max_age_s"]
         self.min_hits = c["min_hits"]
         self.alpha = c["vel_alpha"]
+        self.max_speed_bh = c["max_speed_bh"]
         self.pose_min_kps = c["pose_min_kps"]
         self.min_score = cfg["pose"]["min_score"]
         self.robot_is = cfg["roles"]["robot_is"]
@@ -117,12 +118,18 @@ class Tracker:
             tr.vel = np.zeros(2)                 # stood up / fell: the centre jump is not motion
         elif tr._c_obs is not None and t - tr.t_obs > 1e-3 and tr.kp_t < tr.t_obs - 1e-6:
             # velocity from detector boxes only when no fresher pose drives it
-            tr.vel = (1 - self.alpha) * tr.vel + self.alpha * (c - tr._c_obs) / (t - tr.t_obs)
+            tr.vel = self._cap((1 - self.alpha) * tr.vel + self.alpha * (c - tr._c_obs) / (t - tr.t_obs), box)
         tr.box = np.asarray(box, float).copy()
         tr.t_box = t
         tr.t_obs = max(tr.t_obs, t)             # an async detection can be older than the last pose
         tr._c_obs = c
         tr.hits += 1
+
+    def _cap(self, vel, box):
+        """Limit a velocity to max_speed_bh body sizes per second (a person does not cross the room in 0.3 s)."""
+        limit = self.max_speed_bh * _size(box)
+        n = float(np.linalg.norm(vel))
+        return vel * (limit / n) if n > limit else vel
 
     def observe_pose(self, track_id, kp, t):
         """Store a pose; use its torso anchor to keep the velocity (and so the predicted box) current."""
@@ -138,7 +145,7 @@ class Tracker:
             tr.box = tr.box_at(t)
             tr.t_box = t
             sample = (anchor - tr._anchor) / (t - tr._anchor_t)
-            tr.vel = (1 - self.alpha) * tr.vel + self.alpha * sample
+            tr.vel = self._cap((1 - self.alpha) * tr.vel + self.alpha * sample, tr.box)
             tr.t_obs = t
         tr._anchor, tr._anchor_t = anchor, t
 

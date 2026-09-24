@@ -19,11 +19,14 @@ from core.predictor import Predictor
 from core.rules import Body, DecisionLatch, Pair, RuleEngine, combine
 from core.scheduler import Scheduler
 from VIDEO_pipeline.tracking import Tracker
+from utils.geometry import visible_fraction
 from utils.types import Band, Decision, Level, NodeState, Snapshot
 from VIDEO_pipeline.world import WorldModel
 
 
 class GuardianNode:
+    MIN_VISIBLE = 0.2                            # pose / orientation only for boxes at least this much in frame
+
     def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None,
                  orientation=None, async_detect=False):
         """
@@ -188,16 +191,19 @@ class GuardianNode:
         if tracking and sched.pose_hz > 0:
             t0 = time.perf_counter()
             for tr in [self.tracker.robot] + self.tracker.humans:
-                if tr is not None and t - tr.kp_t >= 1.0 / sched.pose_hz - 1e-6:
-                    kp = self.pose_cascade.estimate(frame, tr.box_at(t), self.pose_models,
-                                                    self._facing_matters(tr), self.sensitive, tr.id in self.sudden)
-                    self.tracker.observe_pose(tr.id, kp, t)
-                    self.predictor.observe(tr.id, t, kp)
-                    if tr.role == "human" and self._orientation_on():
-                        tr.facing, tr.facing_p = self.orientation.classify(frame, tr.box_at(t))
-                        tr.facing_t = t
-                        for k, v in (getattr(self.orientation, "times", {}) or {}).items():
-                            times[k] = times.get(k, 0.0) + v
+                if tr is None or t - tr.kp_t < 1.0 / sched.pose_hz - 1e-6:
+                    continue
+                if visible_fraction(tr.box_at(t), *self.camera.frame_size) < self.MIN_VISIBLE:
+                    continue                     # predicted (mostly) out of the frame: nothing to estimate
+                kp = self.pose_cascade.estimate(frame, tr.box_at(t), self.pose_models,
+                                                self._facing_matters(tr), self.sensitive, tr.id in self.sudden)
+                self.tracker.observe_pose(tr.id, kp, t)
+                self.predictor.observe(tr.id, t, kp)
+                if tr.role == "human" and self._orientation_on():
+                    tr.facing, tr.facing_p = self.orientation.classify(frame, tr.box_at(t))
+                    tr.facing_t = t
+                    for k, v in (getattr(self.orientation, "times", {}) or {}).items():
+                        times[k] = times.get(k, 0.0) + v
             times["pose"] = (time.perf_counter() - t0) * 1e3
             times.update(self.pose_cascade.take_times())
         self.sudden = {tr.id for tr in self.tracker.tracks.values() if self._accel_mps2(tr) > self.cfg["cascade"]["sudden_accel_mps2"]}

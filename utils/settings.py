@@ -22,6 +22,7 @@ DEFAULTS = {
         "max_age_s": 1.5,            # drop a track not observed for this long
         "min_hits": 2,               # observations before a track counts (and can get a role)
         "vel_alpha": 0.5,            # EMA weight of a new velocity sample
+        "max_speed_bh": 2.0,         # velocity cap in body sizes per second (~3.4 m/s): noise must not fling boxes
         "pose_min_kps": 5,           # confident keypoints needed to refresh the box from the pose
     },
     "bands": {                       # distance bands between robot and nearest human (metres)
