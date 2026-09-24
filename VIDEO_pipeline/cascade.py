@@ -43,6 +43,7 @@ class _Cascade:
         self.reasons = Counter()                 # escalation reason -> count
         self.last = ("", ())                     # (stage that produced the result, reasons that led there)
         self.runs = self.cheap_runs = 0          # cascade invocations / those answered by the first stage
+        self.stage_times = Counter()             # model stage -> ms since the last take_times() (profiling)
 
     def configure(self, cfg):
         self.c = cfg["cascade"]
@@ -62,6 +63,7 @@ class _Cascade:
                 continue
             out = call(self.models[name])
             self.calls[name] += 1
+            self.stage_times.update(getattr(self.models[name], "times", {}) or {})
             if last:
                 break
             why = post(out)
@@ -73,6 +75,11 @@ class _Cascade:
         self.runs += 1
         self.cheap_runs += name == names[0]
         return out, name
+
+    def take_times(self):
+        """Per-stage ms of the model calls since the last call (pre / dpu / post), then reset."""
+        out, self.stage_times = dict(self.stage_times), Counter()
+        return out
 
     def cheap_share(self):
         """Fraction of invocations answered by the first (cheapest) stage."""

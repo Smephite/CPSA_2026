@@ -36,6 +36,7 @@ from sensors.power import NullPower, board_power  # noqa: E402
 from sensors.scenario import DemoScenario  # noqa: E402
 from utils import settings as gcfg  # noqa: E402
 from utils.clock import RealClock, SimClock  # noqa: E402
+from utils.profile import Profiler  # noqa: E402
 from utils.event_log import EventLog  # noqa: E402
 from utils.types import NodeState  # noqa: E402
 
@@ -60,6 +61,7 @@ def parse_args(argv=None):
     p.add_argument("--no-log", action="store_true", help="do not write the upstream system log / event diary")
     p.add_argument("--tuning", default=os.path.join(HERE, "guardian_tuning.json"),
                    help="file that keeps settings changed in the web UI (loaded at start); '' = do not load or save")
+    p.add_argument("--profile", metavar="CSV", help="record per-frame stage timings to CSV; summary printed at exit")
     p.add_argument("--cascade", action="store_true",
                    help="low -> high fidelity cascades (survey models; replay stand-ins on the laptop, see DEMO_CASCADE)")
     return p.parse_args(argv)
@@ -176,27 +178,38 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     duration = args.duration if args.duration is not None else (scenario.duration if scenario else 0)
     next_snap = 0.0
+    profiler = Profiler(args.profile) if args.profile else None
     try:
         while not stop.is_set():
+            t_loop = time.perf_counter()
             if tuning.apply_pending():
                 node.reconfigure()
             snap = node.step()
+            t0 = time.perf_counter()
             view = dash.render(snap)
+            times = dict(snap.times, render=(time.perf_counter() - t0) * 1e3)
             for s in list(sinks):
+                t0 = time.perf_counter()
                 try:
                     s.show(view)
                 except Exception as e:           # e.g. HDMI without a monitor: keep the other sinks
                     print(f"{type(s).__name__} disabled: {e}")
                     sinks.remove(s)
+                times[f"sink:{type(s).__name__}"] = (time.perf_counter() - t0) * 1e3
             if args.snapshots and snap.t >= next_snap:
                 import cv2   # noqa: PLC0415
                 cv2.imwrite(os.path.join(args.snapshots, f"t{snap.t:06.2f}.png"), view)
                 next_snap = snap.t + args.snapshot_every
             if snap.state == NodeState.IDLE and isinstance(node.clock, RealClock):
                 time.sleep(0.05)
+            if profiler is not None and snap.state != NodeState.IDLE:
+                times["loop"] = (time.perf_counter() - t_loop) * 1e3
+                profiler.record(snap.t, snap.state.name, times)
             if duration and snap.t >= duration:
                 break
     finally:
+        if profiler is not None:
+            print(profiler.close())
         node.camera.release()
         for s in sinks:
             s.close()

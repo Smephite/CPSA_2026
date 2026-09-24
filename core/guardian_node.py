@@ -144,9 +144,10 @@ class GuardianNode:
 
         if not self.camera.is_open:
             self.camera.open()
+        t_cap = time.perf_counter()
         frame = self.camera.read()
         t = self._t_now = frame.t
-        times = {}
+        times = {"cap": (time.perf_counter() - t_cap) * 1e3}
 
         # --- detector (rate from the band schedule)
         sched = self.schedule
@@ -155,6 +156,7 @@ class GuardianNode:
             t0 = time.perf_counter()
             dets = self.det_cascade.detect(frame, sched.detector, expected, self.sensitive, t, bool(self.sudden))
             times["det"] = (time.perf_counter() - t0) * 1e3
+            times.update(self.det_cascade.take_times())
             self.tracker.update(dets, t)
             self.last_det_t = t
         else:
@@ -188,7 +190,10 @@ class GuardianNode:
                     if tr.role == "human" and self._orientation_on():
                         tr.facing, tr.facing_p = self.orientation.classify(frame, tr.box_at(t))
                         tr.facing_t = t
+                        for k, v in (getattr(self.orientation, "times", {}) or {}).items():
+                            times[k] = times.get(k, 0.0) + v
             times["pose"] = (time.perf_counter() - t0) * 1e3
+            times.update(self.pose_cascade.take_times())
         self.sudden = {tr.id for tr in self.tracker.tracks.values() if self._accel_mps2(tr) > self.cfg["cascade"]["sudden_accel_mps2"]}
 
         # --- predictor + rules (every frame while tracking)
