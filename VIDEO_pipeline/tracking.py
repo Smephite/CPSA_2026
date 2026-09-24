@@ -119,7 +119,8 @@ class Tracker:
             # velocity from detector boxes only when no fresher pose drives it
             tr.vel = (1 - self.alpha) * tr.vel + self.alpha * (c - tr._c_obs) / (t - tr.t_obs)
         tr.box = np.asarray(box, float).copy()
-        tr.t_box = tr.t_obs = t
+        tr.t_box = t
+        tr.t_obs = max(tr.t_obs, t)             # an async detection can be older than the last pose
         tr._c_obs = c
         tr.hits += 1
 

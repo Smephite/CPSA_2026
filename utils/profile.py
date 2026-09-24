@@ -28,8 +28,10 @@ class Profiler:
         lines = []
         for state, rows in sorted(by_state.items()):
             keys = sorted({k for r in rows for k in r} - {"t", "state"})
-            loop = np.mean([r.get("loop", 0.0) for r in rows]) or 1.0
-            lines.append(f"\n{state}: {len(rows)} frames, loop {loop:.1f} ms mean ({1000 / loop:.1f} fps)")
+            total = "loop" if any("loop" in r for r in rows) else "output"
+            loop = np.mean([r.get(total, 0.0) for r in rows]) or 1.0
+            rate = f"{len(rows) / max(rows[-1]['t'] - rows[0]['t'], 1e-6):.1f} per s" if len(rows) > 1 else ""
+            lines.append(f"\n{state}: {len(rows)} frames ({rate}), {total} {loop:.1f} ms mean")
             lines.append(f"  {'stage':16s} {'median':>8s} {'p90':>8s} {'mean':>8s} {'share':>7s}  frames")
             for k in sorted(keys, key=lambda k: -np.mean([r.get(k, 0.0) for r in rows])):
                 vals = np.array([r[k] for r in rows if k in r])

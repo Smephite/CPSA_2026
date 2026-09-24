@@ -14,12 +14,18 @@ class MjpegSink:
     With a `tuning.Tuning`: GET /api/params lists the tunable settings, POST /api/params {path: value} and
     POST /api/reset {"paths": [...]} (empty = all) stage changes; the main loop applies them at the next frame.
     No authentication: anyone who can reach the port can change thresholds (lab use).
+
+    show() only keeps a reference to the latest frame. JPEG encoding happens in the HTTP threads, once per frame,
+    and only while someone watches the stream or asks for a snapshot (it cost ~20 ms per frame on the board).
     """
 
     def __init__(self, port=8080, quality=80, tuning=None):
-        self.jpeg = None
+        self.image, self.version = None, 0
+        self._jpeg, self._jpeg_version = None, -1
         self.cond = threading.Condition()
+        self._encode_lock = threading.Lock()
         self.quality = quality
+        self.clients = 0
         sink = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -64,24 +70,29 @@ class MjpegSink:
                         return self.send_error(404)
                     self._json(tuning.describe())
                 elif self.path == "/snapshot.jpg":
-                    self._send("image/jpeg", sink.jpeg or b"")
+                    self._send("image/jpeg", sink.jpeg() or b"")
                 elif self.path == "/stream":
                     self.send_response(200)
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                     self.end_headers()
-                    last = None
+                    last = -1
+                    with sink.cond:
+                        sink.clients += 1
                     try:
                         while True:
                             with sink.cond:
-                                sink.cond.wait_for(lambda: sink.jpeg is not None and sink.jpeg is not last, timeout=1)
-                                data = sink.jpeg
-                            if data is None or data is last:
+                                sink.cond.wait_for(lambda: sink.image is not None and sink.version != last, timeout=1)
+                                ready = sink.image is not None and sink.version != last
+                            if not ready:
                                 continue
-                            last = data
+                            data, last = sink.jpeg(with_version=True)
                             self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                              + str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n")
                     except (BrokenPipeError, ConnectionResetError):
                         pass
+                    finally:
+                        with sink.cond:
+                            sink.clients -= 1
                 else:
                     self.send_error(404)
 
@@ -91,10 +102,20 @@ class MjpegSink:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def show(self, img):
-        data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self.quality])[1].tobytes()
         with self.cond:
-            self.jpeg = data
+            self.image, self.version = img, self.version + 1
             self.cond.notify_all()
+
+    def jpeg(self, with_version=False):
+        """JPEG of the latest frame, encoded at most once per frame (shared by all viewers)."""
+        with self.cond:
+            img, version = self.image, self.version
+        with self._encode_lock:
+            if self._jpeg_version != version and img is not None:
+                self._jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self.quality])[1].tobytes()
+                self._jpeg_version = version
+            data = self._jpeg
+        return (data, version) if with_version else data
 
     def close(self):
         self.httpd.shutdown()

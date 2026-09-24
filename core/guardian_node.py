@@ -13,6 +13,7 @@ import time
 
 import numpy as np
 
+from core.async_detect import AsyncDetector
 from VIDEO_pipeline.cascade import DetectorCascade, PoseCascade
 from core.predictor import Predictor
 from core.rules import Body, DecisionLatch, Pair, RuleEngine, combine
@@ -24,7 +25,7 @@ from VIDEO_pipeline.world import WorldModel
 
 class GuardianNode:
     def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None,
-                 orientation=None):
+                 orientation=None, async_detect=False):
         """
         cfg                 settings dict (utils/settings.py)
         clock               utils.clock.RealClock or SimClock
@@ -32,12 +33,14 @@ class GuardianNode:
         detectors, poses    model name -> Detector / PoseEstimator, for every name the band table and
                             pose.models use (VIDEO_pipeline/__init__.py)
         orientation         orientation classifier (classify(frame, box) -> (label, p)), optional
+        async_detect        run the detector in its own thread (live node); False = inline, deterministic
         actuators           actuators.ActuatorManager
         events              utils.event_log.EventLog (system log for state changes)
         caption             t -> text shown on the dashboard (scenario beat), optional
         """
         self.cfg, self.clock, self.camera, self.beacon = cfg, clock, camera, beacon
         self.det_cascade = DetectorCascade(cfg, detectors)
+        self.detector = AsyncDetector(self.det_cascade, threaded=async_detect)
         self.pose_cascade = PoseCascade(cfg, poses)
         self.orientation = orientation
 
@@ -149,16 +152,19 @@ class GuardianNode:
         t = self._t_now = frame.t
         times = {"cap": (time.perf_counter() - t_cap) * 1e3}
 
-        # --- detector (rate from the band schedule)
+        # --- detector (rate from the band schedule); async on a live node, the result is applied when ready
         sched = self.schedule
-        if sched.detector_hz > 0 and t - self.last_det_t >= 1.0 / sched.detector_hz - 1e-6:
+        if sched.detector_hz > 0 and t - self.last_det_t >= 1.0 / sched.detector_hz - 1e-6 and not self.detector.busy:
             expected = [tr.box_at(t) for tr in self.tracker.confirmed()]
-            t0 = time.perf_counter()
-            dets = self.det_cascade.detect(frame, sched.detector, expected, self.sensitive, t, bool(self.sudden))
-            times["det"] = (time.perf_counter() - t0) * 1e3
-            times.update(self.det_cascade.take_times())
-            self.tracker.update(dets, t)
-            self.last_det_t = t
+            if self.detector.submit(frame, sched.detector, expected, self.sensitive, t, bool(self.sudden)):
+                self.last_det_t = t
+        result = self.detector.poll()
+        if result is not None:
+            dets, t_det, ms, stage_times = result
+            times["det"] = ms
+            times.update(stage_times)
+            self.tracker.update(dets, t_det)
+            self.tracker.predict(t)
         else:
             self.tracker.predict(t)
             self.tracker.prune(t)

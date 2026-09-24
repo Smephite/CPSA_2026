@@ -29,6 +29,7 @@ from actuators.robot_link import LogRobotLink  # noqa: E402
 from core.guardian_node import GuardianNode  # noqa: E402
 from dashboard import tuning as gtune  # noqa: E402
 from dashboard.sinks import DisplayPortSink, MjpegSink, VideoFileSink  # noqa: E402
+from dashboard.output import OutputWorker  # noqa: E402
 from dashboard.views import Dashboard  # noqa: E402
 from sensors.beacon import AlwaysBeacon, ManualBeacon, ScheduledBeacon  # noqa: E402
 from sensors.camera import ScenarioCamera, WebcamCamera  # noqa: E402
@@ -114,7 +115,7 @@ def build(args, cfg):
     # --- core
     caption = (lambda t: f"scenario t={t:5.1f}s  {scenario.beat(t)}") if scenario else None
     node = GuardianNode(cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=caption,
-                        orientation=orientation)
+                        orientation=orientation, async_detect=not fast)
     return node, beacon, scenario, models, events
 
 
@@ -177,42 +178,38 @@ def main(argv=None):
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     duration = args.duration if args.duration is not None else (scenario.duration if scenario else 0)
-    next_snap = 0.0
     profiler = Profiler(args.profile) if args.profile else None
+    snaps = {"next": 0.0}
+
+    def save_snapshot(view, snap):
+        if args.snapshots and snap.t >= snaps["next"]:
+            import cv2   # noqa: PLC0415
+            cv2.imwrite(os.path.join(args.snapshots, f"t{snap.t:06.2f}.png"), view)
+            snaps["next"] = snap.t + args.snapshot_every
+
+    # drawing + sinks in their own thread on a live node; inline (every frame) for --fast and --record
+    output = OutputWorker(dash, sinks, threaded=not (args.fast or args.record), on_frame=save_snapshot,
+                          profiler=profiler, log=events.system)
     try:
         while not stop.is_set():
             t_loop = time.perf_counter()
             if tuning.apply_pending():
                 node.reconfigure()
             snap = node.step()
-            t0 = time.perf_counter()
-            view = dash.render(snap)
-            times = dict(snap.times, render=(time.perf_counter() - t0) * 1e3)
-            for s in list(sinks):
-                t0 = time.perf_counter()
-                try:
-                    s.show(view)
-                except Exception as e:           # e.g. HDMI without a monitor: keep the other sinks
-                    print(f"{type(s).__name__} disabled: {e}")
-                    sinks.remove(s)
-                times[f"sink:{type(s).__name__}"] = (time.perf_counter() - t0) * 1e3
-            if args.snapshots and snap.t >= next_snap:
-                import cv2   # noqa: PLC0415
-                cv2.imwrite(os.path.join(args.snapshots, f"t{snap.t:06.2f}.png"), view)
-                next_snap = snap.t + args.snapshot_every
+            output.submit(snap)
+            if profiler is not None and snap.state != NodeState.IDLE:
+                profiler.record(snap.t, snap.state.name, dict(snap.times, loop=(time.perf_counter() - t_loop) * 1e3))
             if snap.state == NodeState.IDLE and isinstance(node.clock, RealClock):
                 time.sleep(0.05)
-            if profiler is not None and snap.state != NodeState.IDLE:
-                times["loop"] = (time.perf_counter() - t_loop) * 1e3
-                profiler.record(snap.t, snap.state.name, times)
             if duration and snap.t >= duration:
                 break
     finally:
+        output.close()
         if profiler is not None:
             print(profiler.close())
+            if output.threaded:
+                print(f"output: {output.frames} frames drawn, {output.skipped} skipped (newer snapshot arrived first)")
         node.camera.release()
-        for s in sinks:
-            s.close()
         if models is not None:
             models.close()
     return node
