@@ -127,8 +127,9 @@ class GuardianNode:
         return tr.kp is not None and t - tr.kp_t <= self.pose_max_age
 
     def _body(self, tr, kp=None, box=None):
-        return Body(kp=tr.kp if kp is None else kp, box=tr.box if box is None else box, vel=tr.vel,
-                    facing=self._facing(tr, self._t_now))
+        box = tr.box if box is None else box
+        return Body(kp=tr.kp if kp is None else kp, box=box, vel=tr.vel,
+                    facing=self._facing(tr, self._t_now), floor=self.world.floor(box))
 
     # ---------------------------------------------------------------- one iteration
 

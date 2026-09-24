@@ -32,6 +32,7 @@ class Body:
     box: np.ndarray           # (4,)
     vel: np.ndarray           # (2,) px/s, body
     facing: Optional[str] = None   # orientation model: left | right | front | back (None = unknown)
+    floor: Optional[np.ndarray] = None   # (X, Z) metres on the floor (WorldModel), None = unknown
 
 
 @dataclass
@@ -82,44 +83,54 @@ class RuleEngine:
         n = np.linalg.norm(d)
         return 0.0 if n < 1e-6 else float(p.robot.vel @ (d / n)) * p.m_per_px
 
-    def facing_away(self, human: Body, robot_x):
-        """Does the human face away from the robot? Orientation model or face keypoints, per rules.facing_source."""
+    # Facing direction on the floor plane (X to the image right, Z away from the camera)
+    FACING = {"front": (0.0, -1.0), "back": (0.0, 1.0), "left": (-1.0, 0.0), "right": (1.0, 0.0)}
+
+    def facing_label(self, human: Body):
+        """left | right | front | back, from the orientation model or the face keypoints (rules.facing_source)."""
         source = self.c["facing_source"]
         if source != "keypoints" and human.facing is not None:
-            return self._away_by_orientation(human, robot_x)
+            label = human.facing
+            if self.swap_lr and label in ("left", "right"):
+                label = "right" if label == "left" else "left"
+            return label
         if source == "orientation":
-            return False                              # model only, and it has no confident answer
-        return self._away_by_keypoints(human, robot_x)
+            return None                               # model only, and it has no confident answer
+        return self._label_from_keypoints(human)
 
-    def _away_by_orientation(self, human: Body, robot_x):
-        label = human.facing
-        if self.swap_lr and label in ("left", "right"):
-            label = "right" if label == "left" else "left"
-        if label == "back":
-            return True                               # same meaning as 'no face points' below
-        if label == "front":
-            return False
-        facing_dir = -1.0 if label == "left" else 1.0
-        return facing_dir == -np.sign(robot_x - box_center(human.box)[0])
-
-    def _away_by_keypoints(self, human: Body, robot_x):
+    def _label_from_keypoints(self, human: Body):
         kp = human.kp
         ls, rs = kp[KP["left_shoulder"]], kp[KP["right_shoulder"]]
         if ls[2] < self.min_score or rs[2] < self.min_score:
-            return False
-        face = [kp[KP[n], 2] >= self.min_score for n in ("nose", "left_eye", "right_eye")]
-        if not any(face):
-            return True                               # back of the head towards the camera
+            return None
+        if not any(kp[KP[n], 2] >= self.min_score for n in ("nose", "left_eye", "right_eye")):
+            return "back"                             # back of the head towards the camera
         nose = kp[KP["nose"]]
         if nose[2] < self.min_score:
-            return False
+            return None
         box_h = max(human.box[3] - human.box[1], 1.0)
-        mid = (ls[0] + rs[0]) / 2.0
-        off = (nose[0] - mid) / max(abs(ls[0] - rs[0]), 0.1 * box_h)
+        off = (nose[0] - (ls[0] + rs[0]) / 2.0) / max(abs(ls[0] - rs[0]), 0.1 * box_h)
         if abs(off) < 0.3:
-            return False                              # facing the camera: not away from a robot at its side
-        robot_side = np.sign(robot_x - box_center(human.box)[0])
-        return np.sign(off) == -robot_side
+            return "front"
+        return "right" if off > 0 else "left"
+
+    def facing_away(self, human: Body, robot: Body):
+        """Is the robot behind the human, i.e. within +-60 degrees of the direction opposite to where they face?
+
+        Uses floor positions (X, Z) when both bodies have them, so 'back to the camera' only counts as facing
+        away when the robot is on the camera's side of the human; without depth, the image x offset is used.
+        """
+        label = self.facing_label(human)
+        if label is None:
+            return False
+        if human.floor is not None and robot.floor is not None:
+            d = np.asarray(robot.floor, float) - np.asarray(human.floor, float)
+        else:
+            d = np.array([box_center(robot.box)[0] - box_center(human.box)[0], 0.0])
+        n = np.linalg.norm(d)
+        if n < 1e-6:
+            return False
+        return float(np.dot(self.FACING[label], d / n)) < -0.5
 
     # ---------------------------------------------------------------- predicates
 
@@ -142,7 +153,7 @@ class RuleEngine:
             return Level.NONE
         if self.is_down(p.human, p.m_per_px):
             return Level.NONE                         # no facing direction when lying: `down` covers it
-        return Level.STOP if self.facing_away(p.human, box_center(p.robot.box)[0]) else Level.NONE
+        return Level.STOP if self.facing_away(p.human, p.robot) else Level.NONE
 
     def is_down(self, human: Body, m_per_px):
         kp, box = human.kp, human.box

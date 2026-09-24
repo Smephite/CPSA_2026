@@ -134,7 +134,10 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 - **Replay stand-ins can be too kind.** `ReplayPose` used to return ground truth for any crop. That made the cheap-only run look safe. It is now crop-aware: below 60 % coverage it returns low-confidence keypoints. Be sure a stand-in isn't hiding the failure a test is meant to catch.
 - **Scenario artefacts look like features.** A one-frame "teleport" fall produced fake joint velocities (an early predicted WARN) and no measurable acceleration. The fall is now animated. Robot keyframes are piecewise linear, so reversals are genuine one-frame velocity jumps.
-- **`from_behind` treats "no face points" as "facing away".** This is a known false-STOP risk with poses that lack face points or confidence; the cascade's "face needed" trigger avoids it for SPnet. See open work.
+- **`from_behind` facing is judged on the floor plane** (`RuleEngine.facing_away`). Live in the office, the old rule
+  read "back to the camera" (no face points, or orientation "back") as "back to the robot" and gave a STOP although the
+  seated people faced the robot deeper in the room. Now the facing label (orientation model or face keypoints,
+  `rules.facing_source`) becomes a floor direction and the robot must be within +-60 degrees behind the person.
 - **Board (from earlier sessions):**
   - Keep every xir graph referenced when loading several models, or earlier runners segfault (`DpuModels._graphs`).
   - Only one process may own the DPU and the webcam, so shut down Jupyter kernels first.

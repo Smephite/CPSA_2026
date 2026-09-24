@@ -136,3 +136,24 @@ def test_unknown_depth_never_rules_contact_out(engine):
     """depth_gap_m = 0 (the default, and what an unreliable depth gives) keeps the rules active."""
     robot, touching = body(0.0, pose_front()), body(0.6, pose_front())
     assert engine.rule_reach(pair(robot, touching, 0.6)) == Level.STOP
+
+
+# ---------------------------------------------------------------- facing on the floor plane (live office run)
+
+
+@pytest.mark.parametrize("facing, robot_floor, away", [
+    ("back", (0.0, 5.0), False),    # back to the camera, robot deeper in the room: they face the robot
+    ("back", (0.0, 1.5), True),     # back to the camera, robot between them and the camera: robot behind them
+    ("front", (0.0, 5.0), True),    # facing the camera, robot deeper in the room: robot behind them
+    ("front", (0.0, 1.5), False),
+    ("right", (-1.5, 3.0), True),   # facing image-right, robot on their left
+    ("left", (-1.5, 3.0), False),
+])
+def test_facing_away_uses_floor_positions(engine, cfg, facing, robot_floor, away):
+    cfg["rules"]["facing_source"] = "orientation"
+    engine.configure(cfg)
+    human = Body(kp=np.zeros((17, 3)), box=np.array([300, 100, 360, 350.0]), vel=np.zeros(2), facing=facing,
+                 floor=np.array([0.0, 3.0]))
+    robot = Body(kp=np.zeros((17, 3)), box=np.array([100, 100, 160, 350.0]), vel=np.zeros(2),
+                 floor=np.array(robot_floor))
+    assert engine.facing_away(human, robot) is away

@@ -63,18 +63,19 @@ def test_idle_after_beacon_timeout(run):
 
 
 def test_cheap_models_alone_are_unsafe():
-    """Control for the cascade: the cheap stand-ins alone false-STOP in beat 2 and lose the fallen human."""
+    """Control for the cascade: the cheap stand-ins alone lose the fallen human (no STOP in beat 4)."""
     from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
-    keypoints_only = {**YOLOV3_ONLY, "rules": {"facing_source": "keypoints"}}
-    snaps, _ = simulate(keypoints_only, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
-    assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is not None
+    snaps, _ = simulate(YOLOV3_ONLY, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
     assert first(snaps, Level.STOP, "down", 23.0, 30.0) is None
 
 
-def test_orientation_model_removes_the_faceless_false_stop():
-    """Same face-less cheap pose, but `from_behind` asks the orientation model: no false STOP in beat 2."""
+@pytest.mark.parametrize("source", ["keypoints", "auto"])
+def test_faceless_pose_gives_no_false_stop(source):
+    """A face-less pose reads as 'back to the camera'; with floor geometry that is not 'away from' a robot beside
+    the human, so beat 2 has no false STOP, with keypoints alone or with the orientation model (auto)."""
     from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
-    snaps, _ = simulate(YOLOV3_ONLY, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
+    overrides = {**YOLOV3_ONLY, "rules": {"facing_source": source}}
+    snaps, _ = simulate(overrides, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
     assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is None
 
 
