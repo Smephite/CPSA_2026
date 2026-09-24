@@ -79,6 +79,12 @@ def params(detector_specs=(), pose_specs=()):
         _f("pose.crop_margin_y", 0, 1, 0.01, "Pose crop margin, fraction of box height"),
         _f("pose.min_score", 0.05, 0.95, 0.05, "A joint counts as visible at or above this"),
         _f("pose.max_age_s", 0.05, 5, 0.05, "Rules ignore poses older than this"),
+        _f("pose.hourglass_gain", 0.5, 5, 0.1, "Hourglass heatmap peak x this = joint score"),
+        Param("orientation.enabled", "bool", help="Run the orientation model on humans"),
+        _f("orientation.min_prob", 0.25, 1.0, 0.05, "Ignore orientation answers below this probability"),
+        Param("orientation.swap_left_right", "bool", help="Flip the model's left / right"),
+        Param("rules.facing_source", "choice", help="from_behind: how 'facing away' is decided",
+              choices=("auto", "keypoints", "orientation")),
         _f("predictor.window_s", 0.1, 3, 0.1, "History used to fit joint velocities"),
         _f("predictor.accel_window_s", 0.3, 3, 0.1, "History used to fit torso acceleration"),
         _f("predictor.horizon_s", 0.0, 3, 0.1, "Look-ahead"),
@@ -201,6 +207,18 @@ EFFECTS = {
     "rules.depth_gate_m": "reach, down, pinned and overhead only fire when robot and human are within this "
                           "distance in depth: people who only overlap in the image (one near the camera, one far "
                           "behind) cannot touch. Larger is more cautious; ignored when a depth is unreliable.",
+    "pose.hourglass_gain": "Hourglass heatmap peaks are ~0.1-0.6 on a clear person, not probabilities. Joint score = "
+                           "peak x this gain (capped at 1). Higher counts more joints as visible; calibrate on real "
+                           "footage.",
+    "orientation.enabled": "Classify each human's facing direction (left / right / front / back) at the pose rate, "
+                           "~1.8 ms per person on the DPU. Used by from_behind (see facing source).",
+    "orientation.min_prob": "Orientation answers below this probability are treated as unknown.",
+    "orientation.swap_left_right": "The model's 'left' may mean the person's own left rather than facing image-left. "
+                                   "Check once with someone in profile; flip here if from_behind reacts to the "
+                                   "wrong side.",
+    "rules.facing_source": "How from_behind decides 'facing away from the robot'. auto: orientation model when it "
+                           "is confident, else face keypoints. keypoints: no face points = facing away (can give "
+                           "false STOPs with poses that lack face points). orientation: the model only.",
     "audio.enabled": "Warning tones on the node's audio output.",
     "audio.repeat_s": "How often the tone repeats while WARN or STOP holds.",
 }

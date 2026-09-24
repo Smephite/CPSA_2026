@@ -89,3 +89,53 @@ class CheapReplayPose(ReplayPose):
         if (box[2] - box[0]) > 0.8 * (box[3] - box[1]):
             kp[:, 2] *= 0.3
         return kp
+
+
+class ReplayHourglass(ReplayPose):
+    """Stand-in for Hourglass (MPII): no face points, but fine on lying and bent people."""
+
+    FACE = [0, 1, 2, 3, 4]
+
+    def estimate(self, frame, box):
+        kp = super().estimate(frame, box)
+        kp[self.FACE, 2] = 0.0
+        return kp
+
+
+class ReplayOrientation:
+    """Stand-in for the orientation classifier: reads the facing direction off the scenario's true pose.
+
+    Labels as the real model: left / right (facing image left / right), front, back (relative to the camera).
+    """
+
+    def __init__(self, min_score=0.3):
+        self.min_score = min_score
+        self.times = {}
+
+    def classify(self, frame, box):
+        if not frame.truth:
+            return "front", 0.25
+        c = box_center(box)
+        p = min(frame.truth, key=lambda q: np.linalg.norm(box_center(q.box) - c))
+        kp, s = p.kp, p.kp[:, 2] >= self.min_score
+        if not (s[0] or s[1] or s[2]):
+            return "back", 0.9
+        shoulders_w = abs(kp[5, 0] - kp[6, 0])
+        body_h = max(p.box[3] - p.box[1], 1.0)
+        if shoulders_w < 0.15 * body_h and s[0]:                 # seen edge-on: profile
+            return ("right" if kp[0, 0] > (kp[5, 0] + kp[6, 0]) / 2 else "left"), 0.9
+        return "front", 0.9
+
+
+# Traits of the real models, for their laptop stand-ins (see VIDEO_pipeline/catalog.py)
+CHEAP_DETECTORS = {"yolov2_voc_pruned", "refinedet_096", "refinedet_092"}   # pruned: miss lying people
+
+
+def replay_models(frame_w):
+    """Stand-ins for every catalog model -> (detectors, poses, orientation), same names as on the board."""
+    from VIDEO_pipeline.catalog import CATALOG, names       # noqa: PLC0415
+    full, cheap = ReplayDetector(box_noise_px=1.5), CheapReplayDetector(frame_w=frame_w)
+    detectors = {n: (cheap if n in CHEAP_DETECTORS else full) for n in names("detector")}
+    poses = {"movenet": ReplayPose(kp_noise_px=1.5), "hourglass": ReplayHourglass(kp_noise_px=1.5)}
+    assert set(poses) == set(names("pose")), "every pose model in the catalog needs a stand-in"
+    return detectors, poses, ReplayOrientation() if "orientation" in CATALOG else None

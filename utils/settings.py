@@ -42,7 +42,8 @@ DEFAULTS = {
         "crop_margin_y": 0.12,
         "min_score": 0.3,            # keypoint counts as visible at or above this score
         "max_age_s": 0.5,            # rules ignore poses older than this
-        "models": ["movenet"],       # pose model, or a cascade list cheapest first (e.g. spnet, movenet)
+        "models": ["movenet"],       # pose model, or a cascade list cheapest first (e.g. movenet, hourglass)
+        "hourglass_gain": 2.0,       # Hourglass heatmap peak x this = joint score (peaks are ~0.1-0.6, not 0-1)
     },
     "cascade": {                     # when a cheap stage is trusted (see VIDEO_pipeline/cascade.py)
         "accept_score": 0.6,         # cheap detections below this escalate
@@ -52,6 +53,11 @@ DEFAULTS = {
         "accept_kp": 0.5,            # mean confidence of the body joints needed to keep a cheap pose
         "sensitivity_m": 0.2,        # a rule this close to its threshold escalates both cascades
         "sudden_accel_mps2": 2.0,    # torso acceleration above this escalates (walking peaks ~1-2 m/s^2)
+    },
+    "orientation": {                 # person-orientation classifier (VIDEO_pipeline/ORIENTATION), on humans at pose rate
+        "enabled": True,
+        "min_prob": 0.5,             # below this the answer is ignored (facing rule falls back to keypoints in auto)
+        "swap_left_right": False,    # flip if 'left' turns out to mean the person's own left (check on the board)
     },
     "predictor": {
         "window_s": 0.6,             # history used to fit joint velocities
@@ -75,6 +81,8 @@ DEFAULTS = {
         "drop_radius_m": 1.0,
         "static_lines": [],          # [[x1, y1, x2, y2], ...] in normalised image coords (0..1)
         "enabled": ["reach", "from_behind", "down", "pinned", "overhead"],
+        "facing_source": "auto",     # from_behind: auto (orientation model if confident, else keypoints) |
+                                     #   keypoints (face points) | orientation (model only)
     },
     "decision": {
         "stop_hold_s": 2.0,          # STOP stays latched this long after the last STOP condition

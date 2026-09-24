@@ -118,9 +118,12 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 ## Pitfalls found so far
 
-- **Models checked on the board (2026-09-24):** YOLOv3-VOC 75.6 ms, YOLOv2-VOC pruned 15.7 ms, MoveNet 5.8 ms per call;
-  all four probed models load together on one overlay (≈200 MB). YOLOv2-VOC pruned is now the cheap first detector
-  stage by default. **SPnet is not usable as a cheap pose stage:** its xmodel has two DPU subgraphs with a CPU
+- **Models checked on the board (2026-09-24):** all ten catalog models (`VIDEO_pipeline/catalog.py`, measured DPU
+  times there) load together on one overlay (≈ 400 MB) and are all loaded at startup, so the UI can switch any band's
+  detector (every model alone + cheap -> full pairs) and the pose model live. Decoders were checked against real board
+  output on `test_person.jpg`: all seven detectors box the person, Hourglass joints land on the body, orientation
+  says "front". Unverified: orientation's left/right convention (`orientation.swap_left_right`) and
+  `pose.hourglass_gain` (2.0) on real footage. **SPnet is not usable as a cheap pose stage:** its xmodel has two DPU subgraphs with a CPU
   average-pool between them (PYNQ's `load_model` accepts one), and it regresses 14 joint coordinates with no
   confidence per joint, so the cascade cannot tell a good cheap pose from a bad one.
 

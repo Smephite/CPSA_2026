@@ -31,6 +31,7 @@ class Body:
     kp: np.ndarray            # (17, 3)
     box: np.ndarray           # (4,)
     vel: np.ndarray           # (2,) px/s, body
+    facing: Optional[str] = None   # orientation model: left | right | front | back (None = unknown)
 
 
 @dataclass
@@ -51,6 +52,7 @@ class RuleEngine:
     def configure(self, cfg):
         frame_w, frame_h = self.frame_w, self.frame_h
         self.c = cfg["rules"]
+        self.swap_lr = cfg["orientation"]["swap_left_right"]
         self.min_score = cfg["pose"]["min_score"]
         self.enabled = list(self.c["enabled"])
         self.lines_px = [np.array([l[0] * frame_w, l[1] * frame_h, l[2] * frame_w, l[3] * frame_h], float)
@@ -81,6 +83,26 @@ class RuleEngine:
         return 0.0 if n < 1e-6 else float(p.robot.vel @ (d / n)) * p.m_per_px
 
     def facing_away(self, human: Body, robot_x):
+        """Does the human face away from the robot? Orientation model or face keypoints, per rules.facing_source."""
+        source = self.c["facing_source"]
+        if source != "keypoints" and human.facing is not None:
+            return self._away_by_orientation(human, robot_x)
+        if source == "orientation":
+            return False                              # model only, and it has no confident answer
+        return self._away_by_keypoints(human, robot_x)
+
+    def _away_by_orientation(self, human: Body, robot_x):
+        label = human.facing
+        if self.swap_lr and label in ("left", "right"):
+            label = "right" if label == "left" else "left"
+        if label == "back":
+            return True                               # same meaning as 'no face points' below
+        if label == "front":
+            return False
+        facing_dir = -1.0 if label == "left" else 1.0
+        return facing_dir == -np.sign(robot_x - box_center(human.box)[0])
+
+    def _away_by_keypoints(self, human: Body, robot_x):
         kp = human.kp
         ls, rs = kp[KP["left_shoulder"]], kp[KP["right_shoulder"]]
         if ls[2] < self.min_score or rs[2] < self.min_score:

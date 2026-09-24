@@ -65,28 +65,13 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-# Survey recommendation (docs/model_survey.md) as cascades. On the board these need their DPU backends first.
+# Survey-style cascades: person-only RefineDet first, OFA-YOLO when unsure; MoveNet first, Hourglass for lying /
+# unusual poses. All run on the board; any other combination can be picked live in the web UI.
 DEMO_CASCADE = {
     "bands": {"rates": {band: {"detector": ["refinedet_096", "ofa_yolo_05"]}
                         for band in ("detect", "far", "approach", "close")}},
-    "pose": {"models": ["spnet", "movenet"]},
+    "pose": {"models": ["movenet", "hourglass"]},
 }
-
-
-def replay_models(cfg, frame_w):
-    """Replay stand-ins for every configured model: the cheap variant for all but the last stage of a cascade."""
-    from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose, ReplayDetector, ReplayPose  # noqa
-    full, cheap = ReplayDetector(box_noise_px=1.5), CheapReplayDetector(frame_w=frame_w)
-    detectors = {}
-    for r in cfg["bands"]["rates"].values():
-        names = [r["detector"]] if isinstance(r["detector"], str) else r["detector"]
-        for n in names[:-1]:
-            detectors.setdefault(n, cheap)
-        detectors[names[-1]] = full
-    names = cfg["pose"]["models"]
-    poses = {n: CheapReplayPose() for n in names[:-1]}
-    poses[names[-1]] = ReplayPose(kp_noise_px=1.5)
-    return detectors, poses
 
 
 def build(args, cfg):
@@ -109,14 +94,15 @@ def build(args, cfg):
         beacon = AlwaysBeacon()
     power = board_power(cfg["power"]["rails"]) if args.power else NullPower()
 
-    # --- VIDEO_pipeline: one model object per configured model name
+    # --- VIDEO_pipeline: every catalog model, so any of them can be chosen at runtime
     backend = args.backend or ("replay" if scenario else "dpu")
     models = None
     if backend == "dpu":
         from VIDEO_pipeline import dpu   # noqa: PLC0415 (board only)
-        models, detectors, poses = dpu.build(cfg)
+        models, detectors, poses, orientation = dpu.build(cfg)
     else:
-        detectors, poses = replay_models(cfg, camera.frame_size[0])
+        from VIDEO_pipeline.replay import replay_models   # noqa: PLC0415
+        detectors, poses, orientation = replay_models(camera.frame_size[0])
 
     # --- actuators
     events = EventLog(enabled=not args.no_log)
@@ -125,7 +111,8 @@ def build(args, cfg):
 
     # --- core
     caption = (lambda t: f"scenario t={t:5.1f}s  {scenario.beat(t)}") if scenario else None
-    node = GuardianNode(cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=caption)
+    node = GuardianNode(cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=caption,
+                        orientation=orientation)
     return node, beacon, scenario, models, events
 
 
@@ -140,11 +127,17 @@ def configs(args, log=print):
 
 
 def make_tuning(args, node, base, log):
-    """Tuning over the node's live config; model choices = each loaded model alone plus the configured specs."""
+    """Tuning over the node's live config. Model choices: the configured specs, every catalog model alone, and
+    cheap -> full cascades (VIDEO_pipeline/catalog.py); all of them are loaded, so any choice works live."""
+    from VIDEO_pipeline import catalog   # noqa: PLC0415
     cfg = node.cfg
     specs = [gtune.spec_str(r["detector"]) for r in cfg["bands"]["rates"].values()]
-    det = list(dict.fromkeys(specs + sorted(node.det_cascade.models)))
-    pose = list(dict.fromkeys([gtune.spec_str(cfg["pose"]["models"])] + sorted(node.pose_cascade.models)))
+    det = [c for c in dict.fromkeys(specs + catalog.detector_choices())
+           if all(n in node.det_cascade.models for n in gtune.spec_value(c) if isinstance(gtune.spec_value(c), list))
+           and (not isinstance(gtune.spec_value(c), str) or gtune.spec_value(c) in node.det_cascade.models)]
+    pose = [c for c in dict.fromkeys([gtune.spec_str(cfg["pose"]["models"])] + catalog.pose_choices())
+            if all(n in node.pose_cascade.models for n in ([gtune.spec_value(c)] if isinstance(gtune.spec_value(c), str)
+                                                          else gtune.spec_value(c)))]
     return gtune.Tuning(cfg, base, args.tuning or None, log, det, pose)
 
 

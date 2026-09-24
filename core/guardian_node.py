@@ -23,13 +23,15 @@ from VIDEO_pipeline.world import WorldModel
 
 
 class GuardianNode:
-    def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None):
+    def __init__(self, cfg, clock, camera, beacon, power, detectors, poses, actuators, events, caption=None,
+                 orientation=None):
         """
         cfg                 settings dict (utils/settings.py)
         clock               utils.clock.RealClock or SimClock
         camera, beacon, power   sensors (sensors/__init__.py for their interfaces)
         detectors, poses    model name -> Detector / PoseEstimator, for every name the band table and
                             pose.models use (VIDEO_pipeline/__init__.py)
+        orientation         orientation classifier (classify(frame, box) -> (label, p)), optional
         actuators           actuators.ActuatorManager
         events              utils.event_log.EventLog (system log for state changes)
         caption             t -> text shown on the dashboard (scenario beat), optional
@@ -37,6 +39,7 @@ class GuardianNode:
         self.cfg, self.clock, self.camera, self.beacon = cfg, clock, camera, beacon
         self.det_cascade = DetectorCascade(cfg, detectors)
         self.pose_cascade = PoseCascade(cfg, poses)
+        self.orientation = orientation
 
         self.power, self.actuators, self.events = power, actuators, events
         self.caption = caption or (lambda t: "")
@@ -59,12 +62,14 @@ class GuardianNode:
         self.sensitive = False                   # last frame's rules were near a threshold or predicting a STOP
         self.sudden = set()                      # track ids whose torso accelerated suddenly (last frame)
         self.fps, self._t_prev = 0.0, None
+        self._t_now = 0.0
 
     def configure_self(self, cfg):
         self.min_score = cfg["pose"]["min_score"]
         self.pose_max_age = cfg["pose"]["max_age_s"]
         self.absent_timeout = cfg["beacon"]["absent_timeout_s"]
         self.pose_models = cfg["pose"]["models"]
+        self.orient_cfg = cfg["orientation"]
 
     def reconfigure(self):
         """Re-read every tunable value from self.cfg (after it was changed in place). Keeps tracks and history."""
@@ -72,6 +77,9 @@ class GuardianNode:
         for part in (self.world, self.tracker, self.scheduler, self.predictor, self.engine, self.latch,
                      self.det_cascade, self.pose_cascade, self.actuators):
             part.configure(self.cfg)
+        for model in self.pose_cascade.models.values():          # e.g. Hourglass score gain
+            if hasattr(model, "configure"):
+                model.configure(self.cfg)
 
     # ---------------------------------------------------------------- helpers
 
@@ -95,10 +103,21 @@ class GuardianNode:
         robot = self.tracker.robot
         if tr.role != "human" or robot is None or "from_behind" not in self.engine.enabled:
             return False
+        if self._orientation_on() and self.engine.c["facing_source"] != "keypoints":
+            return False                         # the orientation model answers it: no need for face points
         if (tr.box[2] - tr.box[0]) > self.cfg["cascade"]["lying_aspect"] * (tr.box[3] - tr.box[1]):
             return False                         # lying: no facing direction, `from_behind` ignores it
         gap = self.world.gap_m(robot.box, tr.box) - max(self.closing, 0.0) * self.predictor.horizon_s
         return gap <= self.engine.c["behind_m"] + self.cfg["cascade"]["sensitivity_m"]
+
+    def _orientation_on(self):
+        return self.orientation is not None and self.orient_cfg["enabled"]
+
+    def _facing(self, tr, t):
+        """The track's orientation label if fresh and confident enough, else None."""
+        if tr.facing is None or t - tr.facing_t > self.pose_max_age or tr.facing_p < self.orient_cfg["min_prob"]:
+            return None
+        return tr.facing
 
     def _accel_mps2(self, tr):
         a = self.predictor.acceleration(tr)
@@ -108,12 +127,13 @@ class GuardianNode:
         return tr.kp is not None and t - tr.kp_t <= self.pose_max_age
 
     def _body(self, tr, kp=None, box=None):
-        return Body(kp=tr.kp if kp is None else kp, box=tr.box if box is None else box, vel=tr.vel)
+        return Body(kp=tr.kp if kp is None else kp, box=tr.box if box is None else box, vel=tr.vel,
+                    facing=self._facing(tr, self._t_now))
 
     # ---------------------------------------------------------------- one iteration
 
     def step(self):
-        t = self.clock.now()
+        t = self._t_now = self.clock.now()
         beacon = self.beacon.poll(t)
         if beacon.present:
             self.last_beacon_t = t
@@ -124,7 +144,7 @@ class GuardianNode:
         if not self.camera.is_open:
             self.camera.open()
         frame = self.camera.read()
-        t = frame.t
+        t = self._t_now = frame.t
         times = {}
 
         # --- detector (rate from the band schedule)
@@ -164,6 +184,9 @@ class GuardianNode:
                                                     self._facing_matters(tr), self.sensitive, tr.id in self.sudden)
                     self.tracker.observe_pose(tr.id, kp, t)
                     self.predictor.observe(tr.id, t, kp)
+                    if tr.role == "human" and self._orientation_on():
+                        tr.facing, tr.facing_p = self.orientation.classify(frame, tr.box_at(t))
+                        tr.facing_t = t
             times["pose"] = (time.perf_counter() - t0) * 1e3
         self.sudden = {tr.id for tr in self.tracker.tracks.values() if self._accel_mps2(tr) > self.cfg["cascade"]["sudden_accel_mps2"]}
 

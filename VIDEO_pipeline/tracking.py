@@ -47,6 +47,9 @@ class Track:
     role: Optional[str] = None           # "robot" | "human" | None
     kp: Optional[np.ndarray] = None      # (17, 3) latest pose, frame px
     kp_t: float = -1e9
+    facing: Optional[str] = None         # orientation model: left | right | front | back
+    facing_p: float = 0.0
+    facing_t: float = -1e9
     _anchor: Optional[np.ndarray] = None
     _anchor_t: float = -1e9
     _c_obs: Optional[np.ndarray] = None

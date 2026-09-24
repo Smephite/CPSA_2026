@@ -151,3 +151,33 @@ def test_silent_mode_disables_audio(flag):
     node, *_ = main.build(args, cfg)
     assert args.no_audio and cfg["audio"]["enabled"] is False
     assert any(isinstance(a, NullAudio) for a in node.actuators.actuators)
+
+
+def test_every_model_choice_works_live():
+    """Click through every detector and pose choice while the demo runs: nothing breaks, the models get used."""
+    args = main.parse_args(["--fast", "--no-log", "--silent", "--port", "0", "--tuning", ""])
+    cfg, base = main.configs(args)
+    node, _, scenario, _, _ = main.build(args, cfg)
+    node.events.echo = False
+    tune = main.make_tuning(args, node, base, lambda m: None)
+    by_path = {p["path"]: p for p in tune.describe()}
+    det_choices = by_path["bands.rates.close.detector"]["choices"]
+    pose_choices = by_path["pose.models"]["choices"]
+    assert len(det_choices) >= 18 and "movenet > hourglass" in pose_choices
+    i, next_switch = 0, 9.0
+    while True:
+        s = node.step()
+        if s.t >= next_switch:
+            det = det_choices[i % len(det_choices)]
+            pose = pose_choices[i % len(pose_choices)]
+            _, errors = tune.stage({f"bands.rates.{b}.detector": det for b in ("detect", "far", "approach", "close")}
+                                   | {"pose.models": pose})
+            assert not errors, errors
+            if tune.apply_pending():
+                node.reconfigure()
+            i, next_switch = i + 1, next_switch + 0.4
+        if s.t >= 30.0:
+            break
+    used = {n for n, c in node.det_cascade.calls.items() if c}
+    assert len(used) >= 6, used
+    assert node.pose_cascade.calls["hourglass"] > 0 and node.pose_cascade.calls["movenet"] > 0

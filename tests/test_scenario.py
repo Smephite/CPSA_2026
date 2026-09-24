@@ -65,15 +65,23 @@ def test_idle_after_beacon_timeout(run):
 def test_cheap_models_alone_are_unsafe():
     """Control for the cascade: the cheap stand-ins alone false-STOP in beat 2 and lose the fallen human."""
     from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
-    snaps, _ = simulate(YOLOV3_ONLY, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
+    keypoints_only = {**YOLOV3_ONLY, "rules": {"facing_source": "keypoints"}}
+    snaps, _ = simulate(keypoints_only, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
     assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is not None
     assert first(snaps, Level.STOP, "down", 23.0, 30.0) is None
 
 
+def test_orientation_model_removes_the_faceless_false_stop():
+    """Same face-less cheap pose, but `from_behind` asks the orientation model: no false STOP in beat 2."""
+    from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
+    snaps, _ = simulate(YOLOV3_ONLY, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
+    assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is None
+
+
 def test_cascade_uses_both_stages_for_the_right_reasons():
     _, node = simulate(main.DEMO_CASCADE)
-    assert node.det_cascade.calls["refinedet_096"] > 0 and node.pose_cascade.calls["spnet"] > 0
-    assert node.pose_cascade.reasons["face needed"] > 0 and node.det_cascade.reasons["lying box"] > 0
+    assert node.det_cascade.calls["refinedet_096"] > 0 and node.pose_cascade.calls["hourglass"] > 0
+    assert node.pose_cascade.reasons["not upright"] > 0 and node.det_cascade.reasons["lying box"] > 0
 
 
 @pytest.mark.parametrize("overrides", [YOLOV3_ONLY, None, main.DEMO_CASCADE], ids=["yolov3", "default", "cascade"])

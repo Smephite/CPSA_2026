@@ -63,7 +63,8 @@ def camera_view(snap, min_score, engine):
         col = ROBOT if tr.role == "robot" else HUMAN if tr.role == "human" else MUTED
         x1, y1, x2, y2 = tr.box.astype(int)
         cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
-        put(img, f"{tr.role or 'person'} #{tr.id}", (x1 + 3, max(14, y1 - 5)), 0.45, col, 1)
+        facing = f"  faces {tr.facing}" if getattr(tr, "facing", None) and snap.t - tr.facing_t <= 1.0 else ""
+        put(img, f"{tr.role or 'person'} #{tr.id}{facing}", (x1 + 3, max(14, y1 - 5)), 0.45, col, 1)
         fresh = tr.kp is not None and snap.t - tr.kp_t <= 0.5
         if fresh:
             draw_skeleton(img, tr.kp, col, min_score)

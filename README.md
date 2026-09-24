@@ -15,9 +15,9 @@ module structure. The upstream stereotypy system is in [`legacy/`](legacy/README
 | | |
 |---|---|
 | Board | AMD Kria KV260 (Zynq UltraScale+), DPU B4096, Ubuntu 22.04 + PYNQ-DPU 2.5 (Vitis AI 2.5 models only) |
-| Models | YOLOv2-VOC pruned → YOLOv3-VOC detector cascade, MoveNet Lightning (17 keypoints); Vitis AI 2.5 model zoo |
+| Models | 10 Vitis AI 2.5 zoo models (7 detectors, 2 pose, 1 orientation), all loaded, switchable live; default YOLOv2 → YOLOv3, MoveNet |
 | Laptop | Everything except the DPU runs on a laptop against a synthetic scenario (Python 3.10, `uv`) |
-| Status | Laptop demo and 110 tests green. First live board run done; see [Status](#status) |
+| Status | Laptop demo and 133 tests green. First live board run done; see [Status](#status) |
 
 ---
 
@@ -68,9 +68,13 @@ sensors/                  INPUTS: what the node measures
   scenario.py             DemoScenario: the four-beat demo world, with ground truth
 
 VIDEO_pipeline/           PERCEPTION: who is where, in what pose
-  YOLO/                   yolo.py, yolov2.py (pure pre/post-processing) + the YOLOv3-VOC and YOLOv2-VOC-pruned xmodels
-  MOVENET/                movenet.py (pure pre/post-processing) + the MoveNet xmodel and model-zoo prototxt
-  dpu.py                  board backends: PYNQ overlay, one vart runner per model
+  catalog.py              every model: kind, file, measured DPU time; the UI's model choices come from here
+  YOLO/                   yolo.py (YOLOv3 / YOLOv4 / OFA-YOLO), yolov2.py + their xmodels
+  REFINEDET/              refinedet.py (persons-only SSD-style decoder) + three pruned xmodels
+  MOVENET/                movenet.py + the MoveNet xmodel and model-zoo prototxt
+  HOURGLASS/              hourglass.py (MPII joints -> COCO) + xmodel
+  ORIENTATION/            orientation.py (left / right / front / back) + xmodel
+  dpu.py                  board backends: PYNQ overlay, one vart runner per catalog model
   replay.py               laptop stand-ins reading the scenario's ground truth
   cascade.py              cheapest model first, escalate when unsure
   tracking.py             persistent ids, velocities, robot/human roles
@@ -99,7 +103,7 @@ utils/                    shared building blocks
   geometry.py, clock.py, event_log.py
   config.py, logger.py, lock.py     upstream's config.yaml loader and log files
 
-tests/                    110 tests: decoders, geometry, tracker, rules, scheduler, cascade, tuning, full scenario
+tests/                    133 tests: decoders, geometry, tracker, rules, scheduler, cascade, tuning, full scenario
 tools/power_experiment.py board power protocol (docs/model_survey.md §4.4) -> CSV
 docs/                     model_survey.md (models per stage and band), img/ (reviewed demo frames)
 legacy/                   upstream CPSA_2026 code and README that Guardian does not use
@@ -127,7 +131,7 @@ order, in frame pixels; names ending in `_m` are metres. Only `core/rules.py` tu
 
 ```sh
 uv sync                                               # Python 3.10, numpy 1.26.4, OpenCV 4.11: as on the board
-uv run pytest -q                                      # 110 tests, ~35 s
+uv run pytest -q                                      # 133 tests, ~35 s
 uv run python main.py                                 # demo in real time; dashboard + tuning on http://localhost:8080/
 uv run python main.py --fast --no-audio --port 0 --tuning '' --record out/demo.mp4 --snapshots out/snaps
 uv run python main.py --fast --cascade --no-audio --port 0 --tuning ''      # same demo through the model cascades
@@ -178,6 +182,33 @@ distances, active dangers with time to contact, model rates and the power trace 
 
 ---
 
+## Models
+
+Every model is a Vitis AI 2.5 zoo KV260 build for our DPU; all ten load together at startup (≈ 400 MB), so any
+of them can be chosen per band in the web UI while the node runs. DPU time per call measured on the board:
+
+| Model | Kind | DPU ms | Notes |
+|---|---|---|---|
+| `yolov2_voc_pruned` | detector | 15.7 | cheapest YOLO; default first stage |
+| `refinedet_096` / `_092` / `_08` | detector | 18.0 / 22.7 / 40.1 | trained on people only; 4:3 input like the camera |
+| `yolov4_pruned` | detector | 59.8 | COCO, more accurate than YOLOv3 |
+| `ofa_yolo_05` | detector | 61.6 | COCO, 640 input (YOLOv5-style) |
+| `yolov3_voc` | detector | 75.6 | the original; default last stage |
+| `movenet` | pose | 5.8 | 17 joints incl. face; default |
+| `hourglass` | pose | 17.7 | MPII, handles lying / bent people; no face points; scores scaled by `pose.hourglass_gain` |
+| `orientation` | helper | 1.8 | left / right / front / back per human; feeds `from_behind` |
+
+**Choosing models live:** in the web UI's *Bands* group, each band's detector is a dropdown with every detector
+alone and every cheap → full pair (the first at least 2x faster); *Pose* offers `movenet`, `hourglass` and both
+orders as a cascade. *Orientation* switches the classifier on or off; *Rules → facing_source* picks how
+"facing away" is decided (auto / keypoints / orientation). The status strip shows which model answered and the
+share of calls the cheap stage handled. Details and the model research: `docs/model_survey.md`.
+
+Not usable: SPnet (two DPU subgraphs and no per-joint confidence). Vitis AI 3.x: not for this board, see
+`docs/vitis_ai_35.md`.
+
+---
+
 ## Rules
 
 All five compare distances on the two skeletons; thresholds are in `utils/settings.py` under `rules`.
@@ -218,8 +249,8 @@ A band's detector and `pose.models` may also be a **cascade**, cheapest first (`
 result is not trusted**; both run on the board.
 A cheap result is only accepted when it is confident and matches the tracker; "nobody there" is never trusted.
 The full model runs directly on a 3 s watchdog, near a rule threshold, on sudden torso acceleration, for lying
-people, and when the facing rule needs face points. `--cascade` runs the survey's pairs (RefineDet-ped → OFA-YOLO,
-SPnet → MoveNet); these have laptop stand-ins only, no DPU backend yet. See [`docs/model_survey.md`](docs/model_survey.md).
+people, and when the facing rule needs face points. `--cascade` starts with RefineDet-ped 0.96 → OFA-YOLO and MoveNet → Hourglass; any other combination can be
+picked in the web UI. See [`docs/model_survey.md`](docs/model_survey.md).
 
 ---
 
@@ -262,9 +293,9 @@ SPnet → MoveNet); these have laptop stand-ins only, no DPU backend yet. See [`
 
 ## Extending
 
-- **A model**: implement `detect(frame)` or `estimate(frame, box)` in `VIDEO_pipeline/dpu.py` and add it to
-  `DETECTORS` / `POSES`; add a stand-in to `VIDEO_pipeline/replay.py` for the laptop; name it in the band table.
-  Check the xmodel's DPU fingerprint first (`DPUCZDX8G_ISA1_B4096`, Vitis AI 2.5).
+- **A model**: check the xmodel on the board first (one DPU subgraph, fingerprint 0x101000016010407, Vitis AI
+  2.5); add an entry to `VIDEO_pipeline/catalog.py`, a pure decoder in its folder, a class in
+  `VIDEO_pipeline/dpu.py` (`_make`), and a stand-in in `VIDEO_pipeline/replay.py`. It then appears in the UI.
 - **A rule**: add `rule_<name>(self, p: Pair) -> Level` to `core/rules.py`, list it in `rules.enabled`, add a
   positive and a negative case to `tests/test_rules.py`. Future poses and time to contact come for free.
 - **An actuator**: a class with `configure(cfg)` and `update(decision, t)` in `actuators/`, added to the
@@ -278,7 +309,7 @@ SPnet → MoveNet); these have laptop stand-ins only, no DPU backend yet. See [`
 
 ## Status
 
-Done: the full pipeline on the laptop, 110 tests, the model survey, and a first live run on the board with the
+Done: the full pipeline on the laptop, 133 tests, the model survey, and a first live run on the board with the
 webcam, YOLOv3 and MoveNet on the DPU, HDMI output and the power trace.
 
 Next (details in [`AGENTS.md`](AGENTS.md)): the demo setup on the board (two people standing 2–4 m from the
