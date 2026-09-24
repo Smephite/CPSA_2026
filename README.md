@@ -276,7 +276,18 @@ picked in the web UI. See [`docs/model_survey.md`](docs/model_survey.md).
 | Board power during a YOLOv3 call | peaks ≈ 9.1 W |
 | YOLOv3-VOC call | ≈ 76–84 ms; loop ≈ 7 fps with YOLO at 2–3 Hz |
 | YOLOv2-VOC pruned call (cheap detector stage) | ≈ 16 ms |
-| MoveNet on a crop | ≈ 7–10 ms DPU (earlier pose demo) |
+| MoveNet on a crop | ≈ 3 ms DPU with int8 buffers (5.8 ms with float) |
+| Pipeline, DETECT / TRACK (live webcam, after the speed-ups below) | ≈ 18 fps (camera-bound) / ≈ 16 fps |
+
+**Speed (profiled, `--profile out.csv`):** the ARM, not the DPU, was the bottleneck. Fixed so far:
+- rule geometry vectorised (hull distances): 226 → 47 ms per TRACK frame on the ARM;
+- dashboard drawing and the outputs run in their own thread (`dashboard/output.py`); the web stream is JPEG-encoded
+  only while someone watches (was 20 ms per frame);
+- the detector runs in its own thread (`core/async_detect.py`): poses and rules no longer wait for YOLO;
+- int8 DPU buffers quantised by lookup table (`VIDEO_pipeline/quant.py`, `dpu.int8_io`): YOLOv2 15.7 → 10.2 ms.
+Still expensive on the ARM: dashboard drawing (≈ 80–130 ms, limits the display to ≈ 11 fps), MoveNet decoding
+(≈ 17 ms per call), preprocessing (≈ 10–20 ms). Not available: the VCU hardware video encoder (not in PYNQ's
+`dpu.bit`, no driver or GStreamer plugin) and PL preprocessing (needs a custom overlay).
 
 - **Power**: PYNQ's libsensors does not initialise on this image, so `sensors/power.py` reads the INA260 from
   sysfs (`/sys/class/hwmon/*/power1_input`). It is one sensor for the whole SOM: per-block power is only

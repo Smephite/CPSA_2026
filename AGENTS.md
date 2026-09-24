@@ -118,6 +118,15 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 ## Pitfalls found so far
 
+- **Performance (profiled on the board, 2026-09-24):** the ARM was the bottleneck, not the DPU. Rules were pure-Python
+  point/segment loops (226 ms per TRACK frame); now vectorised. Drawing + HDMI + JPEG (~110 ms) moved to the output
+  thread; the detector to its own thread; DPU I/O is int8. Live: DETECT 7 -> 18 fps, TRACK ~2 -> ~16 fps. Next hot
+  spots: `dashboard/views.py` drawing (80-130 ms, alpha overlays copy the full image), MoveNet decode (17 ms,
+  float64 over 48x48x17), preprocessing. Measure with `--profile` before optimising.
+- **Threads:** only on a live node (`RealClock`); `--fast`, `--record` and the tests stay single-threaded and
+  deterministic. The output thread reads Track objects the main loop updates; fields are replaced, not mutated
+  in place, so a frame may mix two updates but never crashes.
+
 - **Models checked on the board (2026-09-24):** all ten catalog models (`VIDEO_pipeline/catalog.py`, measured DPU
   times there) load together on one overlay (≈ 400 MB) and are all loaded at startup, so the UI can switch any band's
   detector (every model alone + cheap -> full pairs) and the pose model live. Decoders were checked against real board
