@@ -47,18 +47,34 @@ def point_in_polygon(p, poly):
     return inside
 
 
+def hull_distances(points, hull):
+    """(P,) distances from each point to the hull: 0 inside, else to its boundary. Vectorised over points x edges.
+
+    Works for 0-, 1- and 2-point 'hulls' too (inf, point distance, segment distance). The hull must be convex
+    (as from convex_hull), in either winding order.
+    """
+    P = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    H = np.asarray(hull, dtype=np.float64).reshape(-1, 2)
+    if len(H) == 0:
+        return np.full(len(P), np.inf)
+    if len(H) == 1:
+        return np.linalg.norm(P - H[0], axis=1)
+    A, B = (H[:1], H[1:2]) if len(H) == 2 else (H, np.roll(H, -1, axis=0))
+    AB = B - A                                                       # (E, 2)
+    AP = P[:, None, :] - A[None, :, :]                               # (P, E, 2)
+    denom = np.maximum((AB * AB).sum(axis=1), 1e-12)
+    t = np.clip((AP * AB[None]).sum(axis=2) / denom, 0.0, 1.0)       # (P, E)
+    d = np.linalg.norm(AP - t[..., None] * AB[None], axis=2).min(axis=1)
+    if len(H) >= 3:
+        cross = AB[None, :, 0] * AP[..., 1] - AB[None, :, 1] * AP[..., 0]
+        inside = (cross >= -1e-9).all(axis=1) | (cross <= 1e-9).all(axis=1)
+        d[inside] = 0.0
+    return d
+
+
 def distance_to_hull(p, hull):
-    """0 inside the hull, else distance to its boundary. Works for 1- and 2-point 'hulls' too."""
-    hull = np.asarray(hull, dtype=np.float64)
-    if len(hull) == 0:
-        return float("inf")
-    if len(hull) == 1:
-        return float(np.linalg.norm(np.asarray(p) - hull[0]))
-    if len(hull) >= 3 and point_in_polygon(p, hull):
-        return 0.0
-    n = len(hull)
-    segs = range(n) if n >= 3 else range(1)
-    return min(point_segment_distance(p, hull[i], hull[(i + 1) % n]) for i in segs)
+    """0 inside the hull, else distance to its boundary (one point; see hull_distances)."""
+    return float(hull_distances([p], hull)[0])
 
 
 def dilate_polygon(hull, margin, n_arc=6):

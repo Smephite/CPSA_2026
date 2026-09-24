@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from utils.geometry import box_center, convex_hull, distance_to_hull, point_segment_distance
+from utils.geometry import box_center, convex_hull, hull_distances, point_segment_distance
 from utils.types import ARM_IDS, Danger, KP, Level
 
 
@@ -76,7 +76,7 @@ class RuleEngine:
         if not len(r) or not len(h):
             return p.gap_m
         hull = convex_hull(r)
-        return min(distance_to_hull(q, hull) for q in h) * p.m_per_px
+        return float(hull_distances(h, hull).min()) * p.m_per_px
 
     def _closing_mps(self, p: Pair):
         d = box_center(p.human.box) - box_center(p.robot.box)
@@ -146,7 +146,7 @@ class RuleEngine:
             return Level.NONE
         margin = self.c["reach_margin_m"] / p.m_per_px
         pts = p.human.kp[p.human.kp[:, 2] >= self.min_score, :2]
-        return Level.STOP if any(distance_to_hull(q, hull) <= margin for q in pts) else Level.NONE
+        return Level.STOP if len(pts) and hull_distances(pts, hull).min() <= margin else Level.NONE
 
     def rule_from_behind(self, p: Pair) -> Level:
         if p.gap_m > self.c["behind_m"] or self._closing_mps(p) < self.c["closing_min_mps"]:
@@ -214,7 +214,7 @@ class RuleEngine:
             hull = self.arm_hull(p.robot.kp)
             pts = p.human.kp[p.human.kp[:, 2] >= self.min_score, :2]
             if hull is not None and len(pts):
-                d = min(distance_to_hull(q, hull) for q in pts) * p.m_per_px
+                d = float(hull_distances(pts, hull).min()) * p.m_per_px
                 margins.append(abs(d - self.c["reach_margin_m"]))
         if "down" in self.enabled and self.is_down(p.human, p.m_per_px):
             gap = self.body_gap_m(p)

@@ -34,3 +34,15 @@ def test_distance_to_degenerate_hulls():
 def test_point_segment_distance_clamps_to_ends():
     assert point_segment_distance((-3, 4), (0, 0), (10, 0)) == pytest.approx(5.0)
     assert point_segment_distance((2, 2), (1, 1), (1, 1)) == pytest.approx(np.sqrt(2))
+
+
+def test_hull_distances_matches_scalar_version():
+    from utils.geometry import hull_distances
+    rng = np.random.default_rng(0)
+    hull = convex_hull(rng.uniform(0, 100, (12, 2)))
+    pts = rng.uniform(-50, 150, (200, 2))
+    vec = hull_distances(pts, hull)
+    ref = [0.0 if point_in_polygon(p, hull) else min(point_segment_distance(p, hull[i], hull[(i + 1) % len(hull)])
+                                                     for i in range(len(hull))) for p in pts]
+    assert np.allclose(vec, ref)
+    assert np.allclose(hull_distances(pts, hull[::-1]), ref)          # either winding order
