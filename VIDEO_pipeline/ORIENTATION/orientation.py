@@ -16,10 +16,14 @@ MEAN = np.array([103.5, 116.3, 123.6], np.float32)
 SCALE = np.array([0.017124, 0.017507, 0.017429], np.float32)
 
 
+def preprocess_u8(crop_bgr):
+    """Crop -> (176, 80, 3) uint8 RGB (geometry only)."""
+    return cv2.cvtColor(cv2.resize(crop_bgr, (INPUT_HW[1], INPUT_HW[0]), interpolation=cv2.INTER_LINEAR),
+                        cv2.COLOR_BGR2RGB)
+
+
 def preprocess(crop_bgr):
-    rgb = cv2.cvtColor(cv2.resize(crop_bgr, (INPUT_HW[1], INPUT_HW[0]), interpolation=cv2.INTER_LINEAR),
-                       cv2.COLOR_BGR2RGB)
-    return (rgb.astype(np.float32) - MEAN) * SCALE
+    return (preprocess_u8(crop_bgr).astype(np.float32) - MEAN) * SCALE
 
 
 def decode(logits):

@@ -18,16 +18,24 @@ MEAN_RGB = np.array([112.302, 113.22, 110.3385], np.float32)
 MPII_TO_COCO = {0: 16, 1: 14, 2: 12, 3: 11, 4: 13, 5: 15, 10: 10, 11: 8, 12: 6, 13: 5, 14: 7, 15: 9}
 
 
+SCALE = 1.0 / 255.0
+
+
 def preprocess(crop_bgr):
     """Crop -> (x (256, 256, 3) float32, k, ox, oy): letterboxed with black, RGB, normalised."""
+    rgb, k, ox, oy = preprocess_u8(crop_bgr)
+    return (rgb.astype(np.float32) - MEAN_RGB) * SCALE, k, ox, oy
+
+
+def preprocess_u8(crop_bgr):
+    """Crop -> (uint8 (256, 256, 3) RGB letterboxed with black, k, ox, oy) (geometry only)."""
     ih, iw = crop_bgr.shape[:2]
     k = min(SIZE / iw, SIZE / ih)
     nw, nh = max(1, int(round(iw * k))), max(1, int(round(ih * k)))
     canvas = np.zeros((SIZE, SIZE, 3), np.uint8)
     ox, oy = (SIZE - nw) // 2, (SIZE - nh) // 2
     canvas[oy:oy + nh, ox:ox + nw] = cv2.resize(crop_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32)
-    return (rgb - MEAN_RGB) / 255.0, k, ox, oy
+    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), k, ox, oy
 
 
 def decode(heatmaps, score_gain=2.0):

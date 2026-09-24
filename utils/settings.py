@@ -98,6 +98,9 @@ DEFAULTS = {
         "height": 720,
         "dp_pixel_format": "rgb",    # rgb | bgr for PYNQ DisplayPort (colours looked swapped with bgr)
     },
+    "dpu": {
+        "int8_io": True,             # int8 DPU buffers + lookup-table quantisation (faster; False = float, VART converts)
+    },
     "power": {
         "rails": [],                 # names from pynq.get_rails() to sum; empty = all with a power sensor
     },

@@ -21,6 +21,7 @@ import numpy as np
 
 from utils.geometry import expand_box
 from VIDEO_pipeline.catalog import CATALOG
+from VIDEO_pipeline.quant import Quantizer, dequantize, fix_point
 from VIDEO_pipeline.HOURGLASS import hourglass
 from VIDEO_pipeline.MOVENET import movenet as mn
 from VIDEO_pipeline.ORIENTATION import orientation
@@ -63,22 +64,41 @@ class DpuModels:
 
 
 class _DpuModel:
-    """Runner with float in/out buffers and per-call timing."""
+    """Runner with its I/O buffers and per-call timing.
 
-    def __init__(self, runner):
-        self.runner = runner
-        self.shape_in = tuple(runner.get_input_tensors()[0].dims)
-        self.inp = [np.empty(self.shape_in, np.float32, order="C")]      # float in: vart applies fix_point
+    int8=True: int8 buffers; `prepare(u8)` quantises with a lookup table and outputs are dequantised here.
+    int8=False: float32 buffers; VART converts on the ARM (slower, kept as a fallback: dpu.int8_io).
+    `mean` / `scale` are the model's normalisation, applied to the uint8 image in its channel order.
+    """
+
+    def __init__(self, runner, mean=0.0, scale=1.0, int8=True):
+        self.runner, self.int8 = runner, int8
+        it = runner.get_input_tensors()[0]
+        self.shape_in = tuple(it.dims)
         tensors = runner.get_output_tensors()
-        self.out = [np.empty(tuple(t.dims), np.float32, order="C") for t in tensors]
         self.out_names = [t.name for t in tensors]
+        self.out_fix = [fix_point(t) for t in tensors]
+        dtype = np.int8 if int8 else np.float32
+        self.inp = [np.empty(self.shape_in, dtype, order="C")]
+        self.out = [np.empty(tuple(t.dims), dtype, order="C") for t in tensors]
+        self.mean = np.broadcast_to(np.asarray(mean, np.float32), (3,)).copy()
+        self.scale = np.broadcast_to(np.asarray(scale, np.float32), (3,)).copy()
+        self.quant = Quantizer(self.mean, self.scale, fix_point(it)) if int8 else None
         self.times = {}
+
+    def prepare(self, img_u8):
+        """uint8 HWC image -> the input tensor's content (int8 via lookup, or normalised float32)."""
+        if self.int8:
+            return self.quant(img_u8)
+        return (img_u8.astype(np.float32) - self.mean) * self.scale
 
     def run(self, x, prefix):
         t1 = time.perf_counter()
         self.inp[0][0, ...] = x
         self.runner.wait(self.runner.execute_async(self.inp, self.out))
         self.times[prefix + "_dpu"] = (time.perf_counter() - t1) * 1e3
+        if self.int8:
+            return [dequantize(o, f) for o, f in zip(self.out, self.out_fix)]
         return self.out
 
 
@@ -100,15 +120,15 @@ class YoloDetector(_DpuModel):
         "ofa_yolo_05": (114, 0.00392156, yolo.ANCHORS, yolo.COCO_CLASSES, yolo.COCO_PERSON, "v5"),
     }
 
-    def __init__(self, runner, name, score_thresh=0.5):
-        super().__init__(runner)
-        self.name = name
-        self.fill, self.scale, self.anchors, self.classes, self.person, self.style = self.VARIANTS[name]
+    def __init__(self, runner, name, score_thresh=0.5, int8=True):
+        fill, scale, self.anchors, self.classes, self.person, self.style = self.VARIANTS[name]
+        super().__init__(runner, 0.0, scale, int8)
+        self.name, self.fill = name, fill
         self.size, self.score_thresh = self.shape_in[1], score_thresh
 
     def detect(self, frame):
         t0 = time.perf_counter()
-        x = yolo.letterbox(frame.image, self.size, self.fill, self.scale)[0]
+        x = self.prepare(yolo.letterbox_u8(frame.image, self.size, self.fill))
         self.times = {"det_pre": (time.perf_counter() - t0) * 1e3}
         out = self.run(x, "det")
         t2 = time.perf_counter()
@@ -123,13 +143,13 @@ class YoloDetector(_DpuModel):
 class YoloV2Detector(_DpuModel):
     name = "yolov2_voc_pruned"
 
-    def __init__(self, runner, score_thresh=0.3):
-        super().__init__(runner)
+    def __init__(self, runner, score_thresh=0.3, int8=True):
+        super().__init__(runner, 0.0, yolov2.SCALE, int8)
         self.size, self.score_thresh = self.shape_in[1], score_thresh
 
     def detect(self, frame):
         t0 = time.perf_counter()
-        x = yolov2.preprocess(frame.image, self.size)[0]
+        x = self.prepare(yolov2.preprocess_u8(frame.image, self.size))
         self.times = {"det_pre": (time.perf_counter() - t0) * 1e3}
         out = self.run(x, "det")
         t2 = time.perf_counter()
@@ -141,15 +161,15 @@ class YoloV2Detector(_DpuModel):
 class RefineDetDetector(_DpuModel):
     """RefineDet pedestrian (persons only). Heads looked up by name: the runner's output order is not fixed."""
 
-    def __init__(self, runner, name, score_thresh=0.5):
-        super().__init__(runner)
+    def __init__(self, runner, name, score_thresh=0.5, int8=True):
+        super().__init__(runner, refinedet.MEAN_BGR, 1.0, int8)
         self.name, self.score_thresh = name, score_thresh
         self.idx = {h: next(i for i, n in enumerate(self.out_names) if n.startswith(h))
                     for h in ("arm_loc", "arm_conf", "odm_loc", "odm_conf")}
 
     def detect(self, frame):
         t0 = time.perf_counter()
-        x = refinedet.preprocess(frame.image)[0]
+        x = self.prepare(refinedet.preprocess_u8(frame.image))
         self.times = {"det_pre": (time.perf_counter() - t0) * 1e3}
         out = self.run(x, "det")
         t2 = time.perf_counter()
@@ -164,9 +184,9 @@ class RefineDetDetector(_DpuModel):
 class MoveNetPose(_DpuModel):
     name = "movenet"
 
-    def __init__(self, runner, margin=(0.25, 0.12), prototxt=MOVENET_PROTOTXT):
-        super().__init__(runner)
-        self.mean, self.scale, self.center_weight, _ = mn.load_prototxt(prototxt)
+    def __init__(self, runner, margin=(0.25, 0.12), prototxt=MOVENET_PROTOTXT, int8=True):
+        mean, scale, self.center_weight, _ = mn.load_prototxt(prototxt)
+        super().__init__(runner, mean, scale, int8)
         self.margin = margin
         self.size = self.shape_in[1]
         self.idx = {h: next(i for i, n in enumerate(self.out_names) if f"header_{h}" in n) for h in mn.HEADS}
@@ -174,7 +194,8 @@ class MoveNetPose(_DpuModel):
     def estimate(self, frame, box):
         crop, x0, y0 = _crop(frame, box, self.margin)
         t0 = time.perf_counter()
-        x, k, ox, oy = mn.preprocess(crop, self.size, self.mean, self.scale)
+        u8, k, ox, oy = mn.preprocess_u8(crop, self.size, self.mean)
+        x = self.prepare(u8)
         self.times = {"pose_pre": (time.perf_counter() - t0) * 1e3}
         out = self.run(x, "pose")
         t2 = time.perf_counter()
@@ -187,8 +208,8 @@ class MoveNetPose(_DpuModel):
 class HourglassPose(_DpuModel):
     name = "hourglass"
 
-    def __init__(self, runner, margin=(0.25, 0.12), score_gain=2.0):
-        super().__init__(runner)
+    def __init__(self, runner, margin=(0.25, 0.12), score_gain=2.0, int8=True):
+        super().__init__(runner, hourglass.MEAN_RGB, hourglass.SCALE, int8)
         self.margin, self.score_gain = margin, score_gain
 
     def configure(self, cfg):
@@ -197,7 +218,8 @@ class HourglassPose(_DpuModel):
     def estimate(self, frame, box):
         crop, x0, y0 = _crop(frame, box, self.margin)
         t0 = time.perf_counter()
-        x, k, ox, oy = hourglass.preprocess(crop)
+        u8, k, ox, oy = hourglass.preprocess_u8(crop)
+        x = self.prepare(u8)
         self.times = {"pose_pre": (time.perf_counter() - t0) * 1e3}
         out = self.run(x, "pose")
         t2 = time.perf_counter()
@@ -212,13 +234,13 @@ class HourglassPose(_DpuModel):
 class OrientationModel(_DpuModel):
     name = "orientation"
 
-    def __init__(self, runner, margin=(0.05, 0.02)):
-        super().__init__(runner)
+    def __init__(self, runner, margin=(0.05, 0.02), int8=True):
+        super().__init__(runner, orientation.MEAN, orientation.SCALE, int8)
         self.margin = margin
 
     def classify(self, frame, box):
         crop, _, _ = _crop(frame, box, self.margin)
-        out = self.run(orientation.preprocess(crop), "orient")
+        out = self.run(self.prepare(orientation.preprocess_u8(crop)), "orient")
         return orientation.decode(out[0][0])
 
 
@@ -227,18 +249,19 @@ class OrientationModel(_DpuModel):
 
 def _make(name, runner, cfg):
     margin = (cfg["pose"]["crop_margin_x"], cfg["pose"]["crop_margin_y"])
+    q = cfg["dpu"]["int8_io"]
     if name in YoloDetector.VARIANTS:
-        return YoloDetector(runner, name)
+        return YoloDetector(runner, name, int8=q)
     if name == "yolov2_voc_pruned":
-        return YoloV2Detector(runner)
+        return YoloV2Detector(runner, int8=q)
     if name.startswith("refinedet"):
-        return RefineDetDetector(runner, name)
+        return RefineDetDetector(runner, name, int8=q)
     if name == "movenet":
-        return MoveNetPose(runner, margin)
+        return MoveNetPose(runner, margin, int8=q)
     if name == "hourglass":
-        return HourglassPose(runner, margin, cfg["pose"]["hourglass_gain"])
+        return HourglassPose(runner, margin, cfg["pose"]["hourglass_gain"], int8=q)
     if name == "orientation":
-        return OrientationModel(runner)
+        return OrientationModel(runner, int8=q)
     raise ValueError(f"no DPU backend for {name}")
 
 

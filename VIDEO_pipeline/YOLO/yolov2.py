@@ -25,10 +25,17 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
+SCALE = 1.0 / 256.0          # prototxt: mean 0, scale 0.00390625
+
+
+def preprocess_u8(image_bgr, size=448):
+    """BGR image -> (size, size, 3) uint8 RGB (plain resize, no letterbox)."""
+    return cv2.cvtColor(cv2.resize(image_bgr, (size, size), interpolation=cv2.INTER_LINEAR), cv2.COLOR_BGR2RGB)
+
+
 def preprocess(image_bgr, size=448):
     """BGR image -> (1, size, size, 3) float32 RGB, pixel / 256 (plain resize, no letterbox)."""
-    rgb = cv2.cvtColor(cv2.resize(image_bgr, (size, size), interpolation=cv2.INTER_LINEAR), cv2.COLOR_BGR2RGB)
-    return (rgb.astype(np.float32) / 256.0)[None]
+    return (preprocess_u8(image_bgr, size).astype(np.float32) * SCALE)[None]
 
 
 def decode(output, image_hw, score_thresh=0.3, nms_iou=0.45, classes=(PERSON,)):

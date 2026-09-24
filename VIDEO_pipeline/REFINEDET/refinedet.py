@@ -41,10 +41,14 @@ def priors(input_hw=INPUT_HW):
 PRIORS = priors()
 
 
+def preprocess_u8(image_bgr):
+    """BGR image -> (360, 480, 3) uint8 BGR (plain resize: same 4:3 aspect as the camera)."""
+    return cv2.resize(image_bgr, (INPUT_HW[1], INPUT_HW[0]), interpolation=cv2.INTER_LINEAR)
+
+
 def preprocess(image_bgr):
     """BGR image -> (1, 360, 480, 3) float32 BGR minus the mean."""
-    img = cv2.resize(image_bgr, (INPUT_HW[1], INPUT_HW[0]), interpolation=cv2.INTER_LINEAR)
-    return (img.astype(np.float32) - MEAN_BGR)[None]
+    return (preprocess_u8(image_bgr).astype(np.float32) - MEAN_BGR)[None]
 
 
 def _softmax(z):

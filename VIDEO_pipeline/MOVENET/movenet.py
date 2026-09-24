@@ -32,14 +32,19 @@ def _sigmoid(x):
 
 def preprocess(image_bgr, size, mean, scale):
     """Letterbox to size x size -> (normalised float32 HWC RGB, k, ox, oy) to map keypoints back."""
+    canvas, k, ox, oy = preprocess_u8(image_bgr, size, mean)
+    return (canvas.astype(np.float32) - mean) * scale, k, ox, oy
+
+
+def preprocess_u8(image_bgr, size, mean):
+    """Letterbox to size x size, padded with the mean colour -> (uint8 HWC RGB, k, ox, oy) (geometry only)."""
     ih, iw = image_bgr.shape[:2]
     k = min(size / iw, size / ih)
     nw, nh = max(1, int(round(iw * k))), max(1, int(round(ih * k)))
     canvas = np.full((size, size, 3), mean.astype(np.uint8), np.uint8)
     ox, oy = (size - nw) // 2, (size - nh) // 2
     canvas[oy:oy + nh, ox:ox + nw] = cv2.resize(image_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-    return (canvas.astype(np.float32) - mean) * scale, k, ox, oy
+    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), k, ox, oy
 
 
 def decode(heads, center_weight, size):

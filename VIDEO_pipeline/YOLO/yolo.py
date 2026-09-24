@@ -36,15 +36,20 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def letterbox(image_bgr, size=416, fill=128, scale=1.0 / 255.0):
-    """BGR image -> (1, size, size, 3) float32 RGB * scale, padded with `fill` (PYNQ YOLOv3: 128, / 255)."""
+def letterbox_u8(image_bgr, size=416, fill=128):
+    """BGR image -> (size, size, 3) uint8 RGB, aspect kept, padded with `fill` (geometry only)."""
     ih, iw = image_bgr.shape[:2]
     k = min(size / iw, size / ih)
     nw, nh = int(iw * k), int(ih * k)
     canvas = np.full((size, size, 3), fill, np.uint8)
     oy, ox = (size - nh) // 2, (size - nw) // 2
     canvas[oy:oy + nh, ox:ox + nw] = cv2.resize(image_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    return (cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) * scale)[None]
+    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
+
+def letterbox(image_bgr, size=416, fill=128, scale=1.0 / 255.0):
+    """BGR image -> (1, size, size, 3) float32 RGB * scale, padded with `fill` (PYNQ YOLOv3: 128, / 255)."""
+    return (letterbox_u8(image_bgr, size, fill).astype(np.float32) * scale)[None]
 
 
 def decode(outputs, image_hw, input_size=416, score_thresh=0.5, nms_iou=0.45, classes=(PERSON,),
