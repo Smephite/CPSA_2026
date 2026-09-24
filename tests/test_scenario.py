@@ -70,3 +70,21 @@ def test_cascade_uses_both_stages_for_the_right_reasons():
     _, node = simulate(guardian_main.DEMO_CASCADE)
     assert node.det_cascade.calls["refinedet_096"] > 0 and node.pose_cascade.calls["spnet"] > 0
     assert node.pose_cascade.reasons["face needed"] > 0 and node.det_cascade.reasons["lying box"] > 0
+
+
+@pytest.mark.parametrize("overrides", [None, guardian_main.DEMO_CASCADE], ids=["full", "cascade"])
+def test_sudden_motion_only_on_the_fall_and_the_robot_reversal(overrides, monkeypatch):
+    """Torso acceleration crosses the threshold during the fall (21.4-22 s) and when the scripted robot reverses
+    in one frame (19 s), nowhere else: walking and pose noise stay below it."""
+    import guardian.node as gn
+    hits, orig = [], gn.GuardianNode._accel_mps2
+
+    def record(self, tr):
+        a = orig(self, tr)
+        if a > self.cfg["cascade"]["sudden_accel_mps2"]:
+            hits.append((self.clock.now(), tr.role))
+        return a
+    monkeypatch.setattr(gn.GuardianNode, "_accel_mps2", record)
+    simulate(overrides)
+    assert any(r == "human" and 21.4 <= t <= 22.7 for t, r in hits)
+    assert all((r == "human" and 21.4 <= t <= 22.7) or (r == "robot" and 19.0 <= t <= 19.5) for t, r in hits), hits

@@ -7,6 +7,7 @@ Escalation reasons are of two kinds:
     before a cheap stage runs (from context; the cheap stage is then skipped):
         watchdog        the last detector stage has not run for watchdog_s (catches what cheap models miss)
         near threshold  the rules were within sensitivity_m of flipping a decision on the last frame
+        sudden motion   a torso accelerated faster than sudden_accel_mps2 (lunge, fall, abrupt start or stop)
         lying box       a tracked person has a lying-shaped box (pedestrian-trained models miss these)
         face needed     `from_behind` could fire and the cheap pose model has no face points
         not upright     the person's box is not upright (cheap pose models are trained on standing people)
@@ -87,7 +88,7 @@ class DetectorCascade(_Cascade):
         super().configure(cfg)
         self.gate = cfg["tracker"]["gate"]
 
-    def detect(self, frame, names, expected, sensitive, t):
+    def detect(self, frame, names, expected, sensitive, t, sudden=False):
         """expected: predicted boxes of confirmed tracks at t. -> detections of the stage that was accepted."""
         names = _names(names)
         pre = []
@@ -96,6 +97,8 @@ class DetectorCascade(_Cascade):
                 pre.append("watchdog")
             if sensitive:
                 pre.append("near threshold")
+            if sudden:
+                pre.append("sudden motion")
             if any(_aspect(b) > self.c["lying_aspect"] for b in expected):
                 pre.append("lying box")
         dets, name = self._run(names, pre, lambda d: self._post(d, expected), lambda m: m.detect(frame))
@@ -118,7 +121,7 @@ class DetectorCascade(_Cascade):
 
 
 class PoseCascade(_Cascade):
-    def estimate(self, frame, box, names, need_face, sensitive):
+    def estimate(self, frame, box, names, need_face, sensitive, sudden=False):
         names = _names(names)
         pre = []
         if len(names) > 1:
@@ -126,6 +129,8 @@ class PoseCascade(_Cascade):
                 pre.append("face needed")
             if sensitive:
                 pre.append("near threshold")
+            if sudden:
+                pre.append("sudden motion")
             if _aspect(box) >= self.c["upright_aspect"]:
                 pre.append("not upright")
         post = lambda kp: [] if kp[BODY_IDS, 2].mean() >= self.c["accept_kp"] else ["low keypoints"]

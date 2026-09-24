@@ -8,7 +8,7 @@ depth; x positions are metres from the image centre.
     3-9 s    beat 1: robot passes far away (gap > 3 m)    -> DETECT, nothing else
     9-16 s   beat 2: robot approaches from the front      -> TRACK, WARN (reach predicted), robot pauses
     16-19 s  beat 3: human turns away, robot keeps closing -> STOP (from_behind)
-    19-23 s  robot backs off, human falls
+    19-23 s  robot backs off, human falls (21.4-22 s, accelerating)
     23-30 s  beat 4: robot approaches the fallen human    -> WARN, then STOP (down)
     30 s     beacon gone                                   -> IDLE after the timeout
 """
@@ -88,6 +88,7 @@ class DemoScenario:
 
     HUMAN_X = 1.4
     FALLEN_SHIFT = 0.15                                 # lying, the head would leave the frame at HUMAN_X
+    FALL_T, FALL_S = 22.0, 0.6                          # the human is on the floor at FALL_T after FALL_S falling
     ROBOT_X = [(0, -1.9), (3, -1.9), (9, -1.6), (15, 0.4), (17, 0.4), (19, 0.75), (22, -1.4), (23, -1.4),
                (28, 0.3), (40, 0.3)]
 
@@ -97,13 +98,19 @@ class DemoScenario:
     def people(self, t):
         """-> [(name, x_m, pose (17, 2) metres, scores (17,))]"""
         robot = ("robot", self.robot_x(t)) + pose_front()
+        t0 = self.FALL_T - self.FALL_S
         if t < 16.5:
             human = pose_front()
-        elif t < 22.0:
+        elif t < t0:
             human = pose_profile(+1)                    # facing image right, away from the robot on the left
+        elif t < self.FALL_T:
+            u = ((t - t0) / self.FALL_S) ** 2           # falling: accelerating, like a body under gravity
+            (a, sa), (b, sb) = pose_profile(+1), pose_fallen(+1)
+            human = ((1 - u) * a + u * b, np.minimum(sa, sb) if u > 0.5 else sa)
         else:
             human = pose_fallen(+1)
-        x = self.HUMAN_X - (self.FALLEN_SHIFT if t >= 22.0 else 0.0)
+        u = 0.0 if t < t0 else min(1.0, ((t - t0) / self.FALL_S) ** 2)
+        x = self.HUMAN_X - self.FALLEN_SHIFT * u
         out = [robot] if t >= 3.4 else []               # the robot walks in just after its beacon
         return out + [("human", x) + human]
 

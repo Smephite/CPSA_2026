@@ -79,6 +79,7 @@ def params(detector_specs=(), pose_specs=()):
         _f("pose.min_score", 0.05, 0.95, 0.05, "A joint counts as visible at or above this"),
         _f("pose.max_age_s", 0.05, 5, 0.05, "Rules ignore poses older than this"),
         _f("predictor.window_s", 0.1, 3, 0.1, "History used to fit joint velocities"),
+        _f("predictor.accel_window_s", 0.3, 3, 0.1, "History used to fit torso acceleration"),
         _f("predictor.horizon_s", 0.0, 3, 0.1, "Look-ahead"),
         _i("predictor.steps", 1, 10, "Look-ahead samples within the horizon"),
         Param("rules.enabled", "multi", help="Active rules", choices=RULES),
@@ -102,6 +103,7 @@ def params(detector_specs=(), pose_specs=()):
         _f("cascade.upright_aspect", 0.2, 2, 0.05, "Cheap pose only for boxes narrower than this (w / h)"),
         _f("cascade.accept_kp", 0.0, 1.0, 0.05, "Mean body-joint confidence needed to keep a cheap pose"),
         _f("cascade.sensitivity_m", 0.0, 1.0, 0.05, "A rule this close to its threshold escalates"),
+        _f("cascade.sudden_accel_mps2", 0.2, 20, 0.1, "Torso acceleration that counts as sudden motion"),
         Param("audio.enabled", "bool", help="Audio warnings"),
         _f("audio.repeat_s", 0.2, 10, 0.1, "Repeat the tone this often while the level holds"),
     ]
@@ -145,6 +147,8 @@ EFFECTS = {
                       "gaps between pose updates at low rates.",
     "predictor.window_s": "History used to fit joint velocities. Longer is smoother but reacts slower to a sudden "
                           "move; shorter reacts faster and is noisier.",
+    "predictor.accel_window_s": "History used to estimate torso acceleration (sudden motion). Longer is steadier but "
+                                "reacts later and blurs short jolts; at low pose rates it stretches back to 5 poses.",
     "predictor.horizon_s": "How far ahead dangers are predicted. Longer warns earlier and more often; 0 turns "
                            "prediction off (only current STOPs).",
     "predictor.steps": "Look-ahead samples within the horizon. More catches short-lived predicted contacts; costs "
@@ -186,6 +190,10 @@ EFFECTS = {
     "cascade.accept_kp": "Mean body-joint confidence a cheap pose needs to be kept. Higher escalates more.",
     "cascade.sensitivity_m": "When a rule is within this distance of changing its decision, both cascades use their "
                              "full models. Larger escalates more often.",
+    "cascade.sudden_accel_mps2": "A person (or the robot) whose torso accelerates faster than this gets the full "
+                                 "models on the next frame: lunges, falls, abrupt starts and stops. Lower escalates "
+                                 "more often (walking already peaks around 1-2 m/s^2); higher only reacts to violent "
+                                 "moves.",
     "audio.enabled": "Warning tones on the node's audio output.",
     "audio.repeat_s": "How often the tone repeats while WARN or STOP holds.",
 }

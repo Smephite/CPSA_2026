@@ -40,8 +40,8 @@ def dets(cfg):
     return make
 
 
-def run(casc, expected=(UPRIGHT,), sensitive=False, t=0.5):
-    return casc.detect(None, ["cheap", "full"], list(expected), sensitive, t)
+def run(casc, expected=(UPRIGHT,), sensitive=False, t=0.5, sudden=False):
+    return casc.detect(None, ["cheap", "full"], list(expected), sensitive, t, sudden)
 
 
 def test_confident_matching_cheap_result_is_accepted(dets):
@@ -64,6 +64,7 @@ def test_uncertain_cheap_result_escalates(dets, cheap_result, reason):
 @pytest.mark.parametrize("kwargs, reason", [
     ({"t": 5.0}, "watchdog"),
     ({"sensitive": True}, "near threshold"),
+    ({"sudden": True}, "sudden motion"),
     ({"expected": (LYING,)}, "lying box"),
 ])
 def test_context_skips_the_cheap_stage(dets, kwargs, reason):
@@ -113,6 +114,12 @@ def test_pose_context_skips_cheap(poses, box, need_face, sensitive, reason):
     casc, cheap, full = poses()
     casc.estimate(None, box, ["spnet", "movenet"], need_face, sensitive)
     assert (cheap.n, full.n) == (0, 1) and reason in casc.last[1]
+
+
+def test_pose_sudden_motion_skips_cheap(poses):
+    casc, cheap, full = poses()
+    casc.estimate(None, UPRIGHT, ["spnet", "movenet"], False, False, sudden=True)
+    assert (cheap.n, full.n) == (0, 1) and casc.last == ("movenet", ("sudden motion",))
 
 
 def test_pose_low_keypoints_escalate(poses):

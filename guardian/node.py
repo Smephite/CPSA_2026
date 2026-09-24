@@ -46,6 +46,7 @@ class GuardianNode:
         self.closing = 0.0
         self.body_gap = None
         self.sensitive = False                   # last frame's rules were near a threshold or predicting a STOP
+        self.sudden = set()                      # track ids whose torso accelerated suddenly (last frame)
         self.fps, self._t_prev = 0.0, None
 
     def configure_self(self, cfg):
@@ -88,6 +89,10 @@ class GuardianNode:
         gap = self.world.gap_m(robot.box, tr.box) - max(self.closing, 0.0) * self.predictor.horizon_s
         return gap <= self.engine.c["behind_m"] + self.cfg["cascade"]["sensitivity_m"]
 
+    def _accel_mps2(self, tr):
+        a = self.predictor.acceleration(tr)
+        return 0.0 if a is None else float(np.linalg.norm(a)) * self.world.m_per_px(tr.box)
+
     def _fresh(self, tr, t):
         return tr.kp is not None and t - tr.kp_t <= self.pose_max_age
 
@@ -116,7 +121,7 @@ class GuardianNode:
         if sched.detector_hz > 0 and t - self.last_det_t >= 1.0 / sched.detector_hz - 1e-6:
             expected = [tr.box_at(t) for tr in self.tracker.confirmed()]
             t0 = time.perf_counter()
-            dets = self.det_cascade.detect(frame, sched.detector, expected, self.sensitive, t)
+            dets = self.det_cascade.detect(frame, sched.detector, expected, self.sensitive, t, bool(self.sudden))
             times["det"] = (time.perf_counter() - t0) * 1e3
             self.tracker.update(dets, t)
             self.last_det_t = t
@@ -145,10 +150,11 @@ class GuardianNode:
             for tr in [self.tracker.robot] + self.tracker.humans:
                 if tr is not None and t - tr.kp_t >= 1.0 / sched.pose_hz - 1e-6:
                     kp = self.pose_cascade.estimate(frame, tr.box_at(t), self.pose_models,
-                                                    self._facing_matters(tr), self.sensitive)
+                                                    self._facing_matters(tr), self.sensitive, tr.id in self.sudden)
                     self.tracker.observe_pose(tr.id, kp, t)
                     self.predictor.observe(tr.id, t, kp)
             times["pose"] = (time.perf_counter() - t0) * 1e3
+        self.sudden = {tr.id for tr in self.tracker.tracks.values() if self._accel_mps2(tr) > self.cfg["cascade"]["sudden_accel_mps2"]}
 
         # --- predictor + rules (every frame while tracking)
         t0 = time.perf_counter()
@@ -208,6 +214,7 @@ class GuardianNode:
             self.scheduler.reset()
             self.latch.reset()
             self.gap_prev, self.closing, self.body_gap, self.sensitive = None, 0.0, None, False
+            self.sudden = set()
             self.schedule = self.scheduler.update(None)
             self._set_state(NodeState.IDLE, t)
             self.robot_link.update(Level.NONE, "")

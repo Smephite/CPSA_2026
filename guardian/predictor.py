@@ -9,6 +9,8 @@ from collections import deque
 
 import numpy as np
 
+TORSO = (5, 6, 11, 12)                          # shoulders and hips: whole-body motion, not arm swings
+
 
 class PoseHistory:
     def __init__(self, window_s, min_score, maxlen=64):
@@ -42,6 +44,30 @@ class PoseHistory:
         return vel
 
 
+    def torso_acceleration(self, window_s, min_samples=5, min_span_s=0.15):
+        """(2,) px/s^2: mean over confident torso joints of a quadratic least-squares fit, or None.
+
+        Uses the last `window_s`, stretched back to `min_samples` poses (up to 2.5 x window_s) when poses are
+        slow: a short window keeps a jolt sharp at 15 Hz, the stretch keeps 5 Hz usable."""
+        if len(self.samples) < min_samples:
+            return None
+        t_end = self.samples[-1][0]
+        recent = [(t, kp) for t, kp in self.samples if t >= t_end - window_s]
+        if len(recent) < min_samples:
+            recent = list(self.samples)[-min_samples:]
+            if t_end - recent[0][0] > 2.5 * window_s:
+                return None
+        ts = np.array([t for t, _ in recent])
+        kps = np.stack([kp for _, kp in recent])
+        acc = []
+        for j in TORSO:
+            ok = kps[:, j, 2] >= self.min_score
+            if ok.sum() >= 4 and np.ptp(ts[ok]) >= min_span_s:
+                tt = ts[ok] - ts[ok].mean()
+                acc.append([2.0 * np.polyfit(tt, kps[ok, j, d], 2)[0] for d in range(2)])
+        return np.mean(acc, axis=0) if len(acc) >= 2 else None
+
+
 class Predictor:
     def __init__(self, cfg):
         self.histories = {}
@@ -50,6 +76,7 @@ class Predictor:
     def configure(self, cfg):
         p = cfg["predictor"]
         self.window_s, self.horizon_s, self.steps = p["window_s"], p["horizon_s"], int(p["steps"])
+        self.accel_window_s = p["accel_window_s"]
         self.min_score = cfg["pose"]["min_score"]
         for h in self.histories.values():
             h.window_s, h.min_score = self.window_s, self.min_score
@@ -71,6 +98,11 @@ class Predictor:
     def horizon(self):
         """Look-ahead sample times, e.g. [0.25, 0.5, 0.75, 1.0]."""
         return [self.horizon_s * (i + 1) / self.steps for i in range(self.steps)]
+
+    def acceleration(self, track):
+        """(2,) px/s^2 torso acceleration of a track, or None."""
+        h = self.histories.get(track.id)
+        return h.torso_acceleration(self.accel_window_s) if h else None
 
     def velocities(self, track):
         h = self.histories.get(track.id)

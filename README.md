@@ -29,6 +29,7 @@ A band's detector, and `pose.models`, can be a list of models ordered cheapest f
 The next model also runs directly, skipping the cheap one, in four cases:
 - The watchdog is due: the full detector runs at least every `cascade.watchdog_s` (3 s). This catches people the cheap model never detected. It is safe while the robot closes at ≤ ≈0.6 m/s from the 3 m band.
 - A rule is within `cascade.sensitivity_m` of flipping its decision, or a STOP is predicted.
+- A torso accelerates faster than `cascade.sudden_accel_mps2` (2 m/s²): lunges, falls, abrupt starts and stops. The acceleration comes from a quadratic least-squares fit over the pose history (the last 0.5 s, stretched back to 5 poses at low pose rates). In the demo it fires during the fall and when the scripted robot reverses; walking and pose noise stay below 1.7 m/s².
 - The person is lying down.
 - `from_behind` could fire and the cheap pose model has no face points.
 

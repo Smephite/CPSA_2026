@@ -48,9 +48,11 @@ DEFAULTS = {
         "upright_aspect": 0.8,       # cheap pose only for boxes narrower than this (w / h)
         "accept_kp": 0.5,            # mean confidence of the body joints needed to keep a cheap pose
         "sensitivity_m": 0.2,        # a rule this close to its threshold escalates both cascades
+        "sudden_accel_mps2": 2.0,    # torso acceleration above this escalates (walking peaks ~1-2 m/s^2)
     },
     "predictor": {
         "window_s": 0.6,             # history used to fit joint velocities
+        "accel_window_s": 0.5,       # history for torso acceleration, stretched to 5 poses at low pose rates
         "horizon_s": 1.0,            # look-ahead
         "steps": 4,                  # look-ahead samples within the horizon
     },
