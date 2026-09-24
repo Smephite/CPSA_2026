@@ -62,6 +62,12 @@ class Track:
 
 class Tracker:
     def __init__(self, cfg):
+        self.configure(cfg)
+        self.tracks: Dict[int, Track] = {}
+        self.robot_id: Optional[int] = None
+        self._next_id = 1
+
+    def configure(self, cfg):
         c = cfg["tracker"]
         self.gate = c["gate"]
         self.max_age_s = c["max_age_s"]
@@ -70,9 +76,6 @@ class Tracker:
         self.pose_min_kps = c["pose_min_kps"]
         self.min_score = cfg["pose"]["min_score"]
         self.robot_is = cfg["roles"]["robot_is"]
-        self.tracks: Dict[int, Track] = {}
-        self.robot_id: Optional[int] = None
-        self._next_id = 1
 
     # ---------------------------------------------------------------- observations
 

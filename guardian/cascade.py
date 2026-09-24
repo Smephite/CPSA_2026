@@ -36,12 +36,15 @@ def _names(spec):
 
 class _Cascade:
     def __init__(self, cfg, models):
-        c = cfg["cascade"]
-        self.c, self.models = c, models
+        self.models = models
+        self.configure(cfg)
         self.calls = Counter()                   # stage name -> calls
         self.reasons = Counter()                 # escalation reason -> count
         self.last = ("", ())                     # (stage that produced the result, reasons that led there)
         self.runs = self.cheap_runs = 0          # cascade invocations / those answered by the first stage
+
+    def configure(self, cfg):
+        self.c = cfg["cascade"]
 
     def _run(self, names, pre, post, call):
         """pre: reasons known before running; post(result) -> reasons from a cheap result."""
@@ -78,8 +81,11 @@ class _Cascade:
 class DetectorCascade(_Cascade):
     def __init__(self, cfg, detectors):
         super().__init__(cfg, detectors)
-        self.gate = cfg["tracker"]["gate"]
         self.last_full_t = -1e9
+
+    def configure(self, cfg):
+        super().configure(cfg)
+        self.gate = cfg["tracker"]["gate"]
 
     def detect(self, frame, names, expected, sensitive, t):
         """expected: predicted boxes of confirmed tracks at t. -> detections of the stage that was accepted."""

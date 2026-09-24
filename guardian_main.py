@@ -21,6 +21,7 @@ sys.path.insert(0, HERE)
 
 from guardian import config as gcfg  # noqa: E402
 from guardian import io  # noqa: E402
+from guardian import tuning as gtune  # noqa: E402
 from guardian.node import GuardianNode  # noqa: E402
 from guardian.scenario import DemoScenario  # noqa: E402
 from guardian.sinks import DisplayPortSink, MjpegSink, VideoFileSink  # noqa: E402
@@ -45,6 +46,8 @@ def parse_args(argv=None):
     p.add_argument("--no-audio", action="store_true")
     p.add_argument("--power", action="store_true", help="read the board's power rails (pynq)")
     p.add_argument("--no-log", action="store_true", help="do not write the upstream system log / event diary")
+    p.add_argument("--tuning", default=os.path.join(HERE, "guardian_tuning.json"),
+                   help="file that keeps settings changed in the web UI (loaded at start); '' = do not load or save")
     p.add_argument("--cascade", action="store_true",
                    help="low -> high fidelity cascades (survey models; replay stand-ins on the laptop, see DEMO_CASCADE)")
     return p.parse_args(argv)
@@ -109,12 +112,30 @@ def build(args, cfg):
     return node, beacon, scenario, models, events
 
 
+def configs(args, log=print):
+    """-> (live cfg, base). Base = defaults <- config.yaml <- command line; live = base with the tuning file
+    applied underneath the command line (an explicit flag still wins for this run)."""
+    cli = gcfg._merge(DEMO_CASCADE if args.cascade else {}, {"audio": {"enabled": False}} if args.no_audio else {})
+    base = gcfg.load(cli)
+    cfg = gcfg.load()
+    gtune.load_file(args.tuning, cfg, log)
+    return gcfg._merge(cfg, cli), base
+
+
+def make_tuning(args, node, base, log):
+    """Tuning over the node's live config; model choices = each loaded model alone plus the configured specs."""
+    cfg = node.cfg
+    specs = [gtune.spec_str(r["detector"]) for r in cfg["bands"]["rates"].values()]
+    det = list(dict.fromkeys(specs + sorted(node.det_cascade.models)))
+    pose = list(dict.fromkeys([gtune.spec_str(cfg["pose"]["models"])] + sorted(node.pose_cascade.models)))
+    return gtune.Tuning(cfg, base, args.tuning or None, log, det, pose)
+
+
 def main(argv=None):
     args = parse_args(argv)
-    cfg = gcfg.load(DEMO_CASCADE if args.cascade else None)
-    if args.no_audio:
-        cfg["audio"]["enabled"] = False
+    cfg, base = configs(args)
     node, beacon, scenario, models, events = build(args, cfg)
+    tuning = make_tuning(args, node, base, events.system)
     dash = Dashboard(cfg, node.world, node.engine, cfg["display"]["width"], cfg["display"]["height"])
 
     sinks = []
@@ -123,8 +144,8 @@ def main(argv=None):
         subprocess.run(["systemctl", "stop", "gdm"], check=False)
         sinks.append(DisplayPortSink(cfg["display"]["width"], cfg["display"]["height"], cfg["display"]["dp_pixel_format"]))
     if args.port:
-        sinks.append(MjpegSink(args.port))
-        print(f"stream: http://localhost:{args.port}/")
+        sinks.append(MjpegSink(args.port, tuning=tuning))
+        print(f"stream + tuning: http://localhost:{args.port}/" + (f"  (saved to {args.tuning})" if args.tuning else ""))
     if args.record:
         os.makedirs(os.path.dirname(os.path.abspath(args.record)), exist_ok=True)
         sinks.append(VideoFileSink(args.record, fps=15.0))
@@ -147,6 +168,8 @@ def main(argv=None):
     next_snap = 0.0
     try:
         while not stop.is_set():
+            if tuning.apply_pending():
+                node.reconfigure()
             snap = node.step()
             view = dash.render(snap)
             for s in list(sinks):

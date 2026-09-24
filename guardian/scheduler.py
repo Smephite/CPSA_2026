@@ -25,11 +25,14 @@ class Schedule:
 
 class Scheduler:
     def __init__(self, cfg):
+        self.configure(cfg)
+        self.band: Optional[Band] = None
+
+    def configure(self, cfg):
         b = cfg["bands"]
         self.far, self.close, self.hyst = b["far_m"], b["close_m"], b["hysteresis_m"]
         self.fast = b["fast_closing_mps"]
         self.rates = b["rates"]
-        self.band: Optional[Band] = None
 
     def _raw(self, gap):
         if gap < self.close:

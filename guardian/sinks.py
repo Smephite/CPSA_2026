@@ -1,14 +1,22 @@
 """Where the dashboard goes: HDMI monitor (board), MJPEG web stream, video file, snapshot."""
 import http.server
+import json
 import threading
 
 import cv2
 
+from guardian.webui import PAGE
+
 
 class MjpegSink:
-    """http://<host>:<port>/ page, /stream MJPEG, /snapshot.jpg last frame. Demo only: frames leave the node."""
+    """http://<host>:<port>/ page, /stream MJPEG, /snapshot.jpg last frame. Demo only: frames leave the node.
 
-    def __init__(self, port=8080, quality=80):
+    With a `tuning.Tuning`: GET /api/params lists the tunable settings, POST /api/params {path: value} and
+    POST /api/reset {"paths": [...]} (empty = all) stage changes; the main loop applies them at the next frame.
+    No authentication: anyone who can reach the port can change thresholds (lab use).
+    """
+
+    def __init__(self, port=8080, quality=80, tuning=None):
         self.jpeg = None
         self.cond = threading.Condition()
         self.quality = quality
@@ -25,10 +33,36 @@ class MjpegSink:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _json(self, obj, code=200):
+                data = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):
+                if tuning is None or self.path not in ("/api/params", "/api/reset"):
+                    return self.send_error(404)
+                try:
+                    body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                    if not isinstance(body, dict):
+                        raise ValueError("expected a JSON object")
+                except ValueError as e:
+                    return self._json({"ok": {}, "errors": {"": f"bad request: {e}"}}, 400)
+                if self.path == "/api/params":
+                    ok, errors = tuning.stage(body)
+                else:
+                    ok, errors = tuning.reset(body.get("paths"))
+                self._json({"ok": {k: str(v) for k, v in ok.items()}, "errors": errors}, 200 if not errors else 422)
+
             def do_GET(self):
                 if self.path in ("/", "/index.html"):
-                    self._send("text/html", b"<html><body style='margin:0;background:#18181a'>"
-                                            b"<img src='/stream' style='width:100%;max-width:1280px'></body></html>")
+                    self._send("text/html; charset=utf-8", PAGE.encode())
+                elif self.path == "/api/params":
+                    if tuning is None:
+                        return self.send_error(404)
+                    self._json(tuning.describe())
                 elif self.path == "/snapshot.jpg":
                     self._send("image/jpeg", sink.jpeg or b"")
                 elif self.path == "/stream":
@@ -52,6 +86,7 @@ class MjpegSink:
                     self.send_error(404)
 
         self.httpd = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)
+        self.port = self.httpd.server_address[1]
         self.httpd.daemon_threads = True
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

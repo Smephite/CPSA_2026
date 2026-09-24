@@ -174,8 +174,9 @@ class AudioOut:
 
     def __init__(self, cfg, log=print):
         a = cfg["audio"]
-        self.enabled = a["enabled"] and shutil.which("aplay") is not None
-        self.device, self.repeat_s, self.log = a["device"], a["repeat_s"], log
+        self.log = log
+        self.configure(cfg)
+        self.device = a["device"]
         self.proc = None
         self.last = {Level.WARN: -1e9, Level.STOP: -1e9}
         self.dir = tempfile.mkdtemp(prefix="guardian_audio_")
@@ -184,6 +185,11 @@ class AudioOut:
         _tone_wav(self.files[Level.STOP], [(1200, 0.15), (800, 0.15)] * 3)
         if a["enabled"] and not self.enabled:
             log("[audio] aplay not found: audio disabled")
+
+    def configure(self, cfg):
+        a = cfg["audio"]
+        self.enabled = a["enabled"] and shutil.which("aplay") is not None
+        self.repeat_s = a["repeat_s"]
 
     def update(self, level, t, changed):
         if not self.enabled or level == Level.NONE:
@@ -204,6 +210,9 @@ class AudioOut:
 
 
 class NullAudio:
+    def configure(self, cfg):
+        pass
+
     def update(self, level, t, changed):
         pass
 

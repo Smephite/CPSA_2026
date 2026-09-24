@@ -42,6 +42,11 @@ class Pair:
 
 class RuleEngine:
     def __init__(self, cfg, frame_w, frame_h):
+        self.frame_w, self.frame_h = frame_w, frame_h
+        self.configure(cfg)
+
+    def configure(self, cfg):
+        frame_w, frame_h = self.frame_w, self.frame_h
         self.c = cfg["rules"]
         self.min_score = cfg["pose"]["min_score"]
         self.enabled = list(self.c["enabled"])
@@ -208,8 +213,11 @@ class DecisionLatch:
     """Holds STOP for stop_hold_s after the last STOP condition and WARN for warn_hold_s."""
 
     def __init__(self, cfg):
-        self.stop_hold, self.warn_hold = cfg["decision"]["stop_hold_s"], cfg["decision"]["warn_hold_s"]
+        self.configure(cfg)
         self.reset()
+
+    def configure(self, cfg):
+        self.stop_hold, self.warn_hold = cfg["decision"]["stop_hold_s"], cfg["decision"]["warn_hold_s"]
 
     def reset(self):
         self.stop_until = self.warn_until = -1e9

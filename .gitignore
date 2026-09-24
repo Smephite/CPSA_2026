@@ -4,3 +4,5 @@ logs/
 .venv/
 .pytest_cache/
 out/
+guardian_tuning.json
+guardian_tuning.json.tmp

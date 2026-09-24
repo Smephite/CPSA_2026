@@ -73,6 +73,14 @@ sudo -i; source /etc/profile.d/pynq_venv.sh; python3 tools/power_experiment.py -
 
 ### Configuration
 
+**Live tuning.** Open `http://<node>:8080/` to see the dashboard stream next to every tunable setting: thresholds, rates, hysteresis, cascade values, rule switches, and the model per band (chosen among the models loaded at startup). Each setting shows its range and default, and hovering over its name explains what changing it does.
+- A change is applied at the next frame. Tracks and history are kept.
+- Every change is written to the event log with its old and new value.
+- Changes are saved to `guardian_tuning.json` (git-ignored; `--tuning PATH` to move it, `--tuning ''` to turn it off) and loaded again at the next start.
+- A command-line flag such as `--cascade` or `--no-audio` still wins for its run. "Reset" goes back to the startup value.
+- Camera, display, model files and `static_lines` are startup-only.
+- **There is no authentication.** Anyone who can reach the port can change thresholds or switch rules off, so only use it on a trusted lab network.
+
 Defaults are in `guardian/config.py`. Override any of them in a `guardian:` section of `config.yaml`:
 
 ```yaml

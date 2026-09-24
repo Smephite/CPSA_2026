@@ -44,10 +44,15 @@ class PoseHistory:
 
 class Predictor:
     def __init__(self, cfg):
-        p = cfg["predictor"]
-        self.window_s, self.horizon_s, self.steps = p["window_s"], p["horizon_s"], p["steps"]
-        self.min_score = cfg["pose"]["min_score"]
         self.histories = {}
+        self.configure(cfg)
+
+    def configure(self, cfg):
+        p = cfg["predictor"]
+        self.window_s, self.horizon_s, self.steps = p["window_s"], p["horizon_s"], int(p["steps"])
+        self.min_score = cfg["pose"]["min_score"]
+        for h in self.histories.values():
+            h.window_s, h.min_score = self.window_s, self.min_score
 
     def observe(self, track_id, t, kp):
         h = self.histories.get(track_id)

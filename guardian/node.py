@@ -26,7 +26,7 @@ class GuardianNode:
         self.cfg, self.clock, self.camera, self.beacon = cfg, clock, camera, beacon
         self.det_cascade = DetectorCascade(cfg, detectors)
         self.pose_cascade = PoseCascade(cfg, poses)
-        self.pose_models = cfg["pose"]["models"]
+
         self.audio, self.robot_link, self.power, self.events = audio, robot_link, power, events
         self.caption = caption or (lambda t: "")
         w, h = camera.frame_size
@@ -36,9 +36,7 @@ class GuardianNode:
         self.predictor = Predictor(cfg)
         self.engine = RuleEngine(cfg, w, h)
         self.latch = DecisionLatch(cfg)
-        self.min_score = cfg["pose"]["min_score"]
-        self.pose_max_age = cfg["pose"]["max_age_s"]
-        self.absent_timeout = cfg["beacon"]["absent_timeout_s"]
+        self.configure_self(cfg)
 
         self.state = NodeState.IDLE
         self.schedule = self.scheduler.update(None)
@@ -49,6 +47,19 @@ class GuardianNode:
         self.body_gap = None
         self.sensitive = False                   # last frame's rules were near a threshold or predicting a STOP
         self.fps, self._t_prev = 0.0, None
+
+    def configure_self(self, cfg):
+        self.min_score = cfg["pose"]["min_score"]
+        self.pose_max_age = cfg["pose"]["max_age_s"]
+        self.absent_timeout = cfg["beacon"]["absent_timeout_s"]
+        self.pose_models = cfg["pose"]["models"]
+
+    def reconfigure(self):
+        """Re-read every tunable value from self.cfg (after it was changed in place). Keeps tracks and history."""
+        self.configure_self(self.cfg)
+        for part in (self.world, self.tracker, self.scheduler, self.predictor, self.engine, self.latch,
+                     self.det_cascade, self.pose_cascade, self.audio):
+            part.configure(self.cfg)
 
     # ---------------------------------------------------------------- helpers
 

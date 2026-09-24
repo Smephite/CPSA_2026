@@ -218,7 +218,10 @@ class Dashboard:
         self.pw, self.ph = width // 2, int(height * 0.72)
         self.scene = SceneRenderer(self.pw, self.ph)
         self.power = deque(maxlen=240)
-        self.min_score = cfg["pose"]["min_score"]
+
+    @property
+    def min_score(self):
+        return self.cfg["pose"]["min_score"]
 
     def render(self, snap):
         out = np.full((self.h, self.w, 3), BG, np.uint8)

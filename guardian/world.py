@@ -10,9 +10,12 @@ import numpy as np
 
 class WorldModel:
     def __init__(self, cfg, frame_w, frame_h):
+        self.w, self.h = frame_w, frame_h
+        self.configure(cfg)
+
+    def configure(self, cfg):
         self.f = cfg["camera"]["focal_px"]
         self.person_h = cfg["person_height_m"]
-        self.w, self.h = frame_w, frame_h
 
     def size_px(self, box):
         return max(box[3] - box[1], box[2] - box[0], 1.0)
