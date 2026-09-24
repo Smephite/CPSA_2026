@@ -62,3 +62,13 @@ def test_movenet_to_frame_undoes_letterbox_and_crop():
     kp_model = np.array([[ox + 0.0, oy + 0.0, 1.0], [ox + 150 * k, oy + 300 * k, 1.0]] + [[0, 0, 0]] * 15)
     kp = movenet.to_frame(kp_model, k, ox, oy, 100, 50)
     np.testing.assert_allclose(kp[:2, :2], [[100, 50], [250, 350]], atol=1e-6)
+
+
+
+def test_dpu_model_files_exist():
+    """The board backend's model paths point at files in the repo (otherwise this only shows up on the board)."""
+    import os
+
+    from VIDEO_pipeline import dpu                    # pynq_dpu is imported lazily: safe on a laptop
+    for path in list(dpu.MODELS.values()) + [dpu.MOVENET_PROTOTXT]:
+        assert os.path.isfile(path), path

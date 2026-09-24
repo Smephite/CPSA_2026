@@ -16,13 +16,12 @@ from utils.geometry import expand_box
 from VIDEO_pipeline.MOVENET import movenet as mn
 from VIDEO_pipeline.YOLO import yolo
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.abspath(__file__))          # VIDEO_pipeline/
 MODELS = {
-    "yolov3_voc": os.path.join(REPO, "VIDEO_pipeline", "YOLO",
-                               "pynqdpu.tf_yolov3_voc.DPUCZDX8G_ISA1_B4096.2.5.0.xmodel"),
-    "movenet": os.path.join(REPO, "VIDEO_pipeline", "MOVENET", "kv260_MoveNet_int.xmodel"),
+    "yolov3_voc": os.path.join(HERE, "YOLO", "pynqdpu.tf_yolov3_voc.DPUCZDX8G_ISA1_B4096.2.5.0.xmodel"),
+    "movenet": os.path.join(HERE, "MOVENET", "kv260_MoveNet_int.xmodel"),
 }
-MOVENET_PROTOTXT = os.path.join(REPO, "VIDEO_pipeline", "MOVENET", "movenet_ntd_pt.prototxt")
+MOVENET_PROTOTXT = os.path.join(HERE, "MOVENET", "movenet_ntd_pt.prototxt")
 
 
 class DpuModels:
