@@ -9,6 +9,9 @@ Laptop (no FPGA):
     uv run python main.py --fast --record out/demo.mp4   # render the demo to a video as fast as possible
 Board (KV260, root, PYNQ environment: see run.sh):
     ./run.sh --source webcam --backend dpu --hdmi                 # live: webcam -> DPU -> HDMI (+ MJPEG)
+    ./record.sh out/clips/reach.avi                               # record raw webcam clips (live view on HDMI)
+    ./run.sh --source video --video out/clips/reach.avi --loop    # replay a clip live, tune in the web UI
+    ./run.sh --source video --video out/clips/reach.avi --fast    # every frame as fast as possible (repeatable)
 
 Beacon: --beacon scenario (demo timeline) | always | manual (type 'b' + Enter to toggle).
 """
@@ -32,7 +35,7 @@ from dashboard.sinks import DisplayPortSink, MjpegSink, VideoFileSink  # noqa: E
 from dashboard.output import OutputWorker  # noqa: E402
 from dashboard.views import Dashboard  # noqa: E402
 from sensors.beacon import AlwaysBeacon, ManualBeacon, ScheduledBeacon  # noqa: E402
-from sensors.camera import ScenarioCamera, WebcamCamera  # noqa: E402
+from sensors.camera import ScenarioCamera, VideoFileCamera, WebcamCamera  # noqa: E402
 from sensors.power import NullPower, board_power  # noqa: E402
 from sensors.system import SystemMonitor  # noqa: E402
 from sensors.scenario import DemoScenario  # noqa: E402
@@ -45,12 +48,15 @@ from utils.types import NodeState  # noqa: E402
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--source", choices=["scenario", "webcam"], default="scenario")
+    p.add_argument("--source", choices=["scenario", "webcam", "video"], default="scenario")
+    p.add_argument("--video", metavar="CLIP", help="clip for --source video (recorded with tools/record.py)")
+    p.add_argument("--loop", action="store_true", help="--source video: play the clip over and over")
     p.add_argument("--backend", choices=["replay", "dpu"], default=None,
-                   help="perception backend (default: replay for scenario, dpu for webcam)")
+                   help="perception backend (default: replay for scenario, dpu for webcam and video)")
     p.add_argument("--beacon", choices=["scenario", "always", "manual"], default=None,
-                   help="default: scenario timeline for the scenario source, always for the webcam")
-    p.add_argument("--fast", action="store_true", help="simulated clock: run the scenario as fast as possible")
+                   help="default: scenario timeline for the scenario source, always for webcam and video")
+    p.add_argument("--fast", action="store_true",
+                   help="simulated clock: run the scenario or video as fast as possible, every frame (repeatable)")
     p.add_argument("--duration", type=float, default=None, help="stop after N seconds (scenario default: its length)")
     p.add_argument("--port", type=int, default=8080, help="MJPEG stream port, 0 = off (default 8080)")
     p.add_argument("--hdmi", action="store_true", help="dashboard full screen on the HDMI monitor (board)")
@@ -81,11 +87,15 @@ DEMO_CASCADE = {
 def build(args, cfg):
     """Create every box and wire them into a GuardianNode. -> (node, beacon, scenario, models, events)"""
     # --- sensors
-    fast = args.fast and args.source == "scenario"
+    fast = args.fast and args.source in ("scenario", "video")
     clock = SimClock() if fast else RealClock()
     scenario = DemoScenario() if args.source == "scenario" else None
     if scenario:
         camera = ScenarioCamera(clock, scenario)
+    elif args.source == "video":
+        if not args.video:
+            raise SystemExit("--source video needs --video CLIP")
+        camera = VideoFileCamera(clock, args.video, loop=args.loop)
     else:
         c = cfg["camera"]
         camera = WebcamCamera(clock, c["index"], c["width"], c["height"])
@@ -202,7 +212,7 @@ def main(argv=None):
                 profiler.record(snap.t, snap.state.name, dict(snap.times, loop=(time.perf_counter() - t_loop) * 1e3))
             if snap.state == NodeState.IDLE and isinstance(node.clock, RealClock):
                 time.sleep(0.05)
-            if duration and snap.t >= duration:
+            if duration and snap.t >= duration or getattr(node.camera, "finished", False):
                 break
     finally:
         output.close()
