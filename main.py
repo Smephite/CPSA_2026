@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Guardian Node: entry point. Builds the module boxes, wires them together, runs the loop.
 
-    sensors/  ─► VIDEO_pipeline/ ─► core/ ─► actuators/     (docs/ARCHITECTURE.md)
+    sensors/  ─► VIDEO_pipeline/ ─► core/ ─► actuators/     (README.md: "How it works")
                                       └────► dashboard/
 
 Laptop (no FPGA):

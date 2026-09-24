@@ -9,7 +9,7 @@ Guardian Node is an infrastructure-side safety supervisor on an AMD Kria KV260. 
 - warning tones through the HDMI screen;
 - a robot link that only logs `slow` / `stop` / `resume`.
 
-In the demo, a person plays the robot. The beacon that says "a robot is near" is simulated (`guardian/io.py`), and its interface is kept open for a real BLE listener.
+In the demo, a person plays the robot. The beacon that says "a robot is near" is simulated (`sensors/, actuators/, utils/clock.py, utils/event_log.py`), and its interface is kept open for a real BLE listener.
 
 The upstream CPSA_2026 code (`main.py`, `core/`, `actuators/`, `VIDEO_pipeline/*_thread.py`) is left in place but not used. The upstream IMU pipeline was removed from the Guardian path.
 
@@ -17,10 +17,10 @@ The upstream CPSA_2026 code (`main.py`, `core/`, `actuators/`, `VIDEO_pipeline/*
 
 ```sh
 uv sync                                          # Python 3.10 to match the board's PYNQ venv; numpy 1.26.4, opencv-headless 4.11
-uv run pytest -q                                 # 102 tests, ~25 s; must stay green
-uv run python guardian_main.py --fast --no-audio --port 0 --tuning '' --record out/demo.mp4 --snapshots out/snaps
-uv run python guardian_main.py --fast --no-audio --port 0 --tuning '' --cascade      # same demo through the model cascades
-uv run python guardian_main.py                   # real time, dashboard + tuning UI on http://localhost:8080/
+uv run pytest -q                                 # 110 tests, ~35 s; must stay green
+uv run python main.py --fast --no-audio --port 0 --tuning '' --record out/demo.mp4 --snapshots out/snaps
+uv run python main.py --fast --no-audio --port 0 --tuning '' --cascade      # same demo through the model cascades
+uv run python main.py                   # real time, dashboard + tuning UI on http://localhost:8080/
 ```
 
 Expected decisions in the fast demo (full models and `--cascade` agree within ~0.2 s):
@@ -37,9 +37,9 @@ Expected decisions in the fast demo (full models and `--cascade` agree within ~0
 
 Pass `--tuning ''` for reproducible runs. Otherwise `guardian_tuning.json`, written by the web UI, changes the settings.
 
-Board (not verified yet, see open work): `./run.sh` becomes root, sources the PYNQ environment and runs `guardian_main.py --source webcam --backend dpu --hdmi`. Power measurements: `tools/power_experiment.py`.
+Board (not verified yet, see open work): `./run.sh` becomes root, sources the PYNQ environment and runs `main.py --source webcam --backend dpu --hdmi`. Power measurements: `tools/power_experiment.py`.
 
-## How a frame flows (`guardian/node.py`, `GuardianNode.step`)
+## How a frame flows (`core/guardian_node.py`, `GuardianNode.step`)
 
 ```
 beacon.poll ──absent > absent_timeout_s──► IDLE: camera off, no inference, state reset
@@ -59,28 +59,20 @@ Only the camera, perception backend, clock and beacon differ between laptop and 
 
 ## Code map
 
-| File | Role |
-|---|---|
-| `guardian_main.py` | CLI, config layering (`configs`), model construction (`build`, `replay_models`), `DEMO_CASCADE`, main loop (applies tuning, steps the node, feeds sinks) |
-| `guardian/config.py` | All defaults, with a comment per value. Overridden by `guardian:` in `config.yaml` |
-| `guardian/node.py` | The per-frame loop above; `reconfigure()` re-reads settings live |
-| `guardian/tracking.py` | Nearest-centroid tracker, constant-velocity prediction between detections, role lock |
-| `guardian/scheduler.py` | Distance bands → detector / pose model and rates |
-| `guardian/world.py` | Monocular "fake 3D": depth from box size, floor positions, gap |
-| `guardian/predictor.py` | Pose time series: joint velocities, future poses, torso acceleration |
-| `guardian/rules.py` | The five rules, `body_gap_m`, `near_threshold`, `combine`, `DecisionLatch` |
-| `guardian/cascade.py` | Low → high fidelity model cascades for detector and pose, escalation reasons, statistics |
-| `guardian/tuning.py` | Tunable settings table (ranges, help, hover texts), validation, staging, JSON persistence |
-| `guardian/webui.py` | The web page (stream + tuning panel), plain HTML/JS |
-| `guardian/sinks.py` | MJPEG server with `/api/params` and `/api/reset`, mp4 writer, PYNQ DisplayPort |
-| `guardian/views.py` | Dashboard 1280x720: camera overlay, virtual scene, status strip |
-| `guardian/io.py` | Beacons, clocks, cameras, `aplay` audio, robot link log, power rails, upstream event log |
-| `guardian/scenario.py` | Synthetic four-beat demo: renders frames and attaches ground truth |
-| `guardian/perception/yolo.py`, `movenet.py` | Pure NumPy/OpenCV pre- and post-processing (tested on the laptop) |
-| `guardian/perception/dpu.py` | Board runners (PYNQ-DPU 2.5); `DETECTORS` / `POSES` list what is implemented |
-| `guardian/perception/replay.py` | Laptop stand-ins from ground truth, plus deliberately worse `CheapReplay*` models for the cascade |
-| `tools/power_experiment.py` | Board power protocol (survey §4.4, steps 1–4 and 6) → CSV |
-| `run.sh` | Board launcher |
+The layout follows upstream CPSA_2026's module boxes; the full tree is in README.md ("Repository structure").
+Each box's `__init__.py` documents its interface. Boxes only talk through the types in `utils/types.py`:
+
+| Box | Files | Interface |
+|---|---|---|
+| `sensors/` | `camera.py`, `beacon.py`, `power.py`, `scenario.py` | `Camera.read() -> Frame`, `BeaconSource.poll(t) -> BeaconState`, `PowerMeter.read() -> W` |
+| `VIDEO_pipeline/` | `YOLO/yolo.py`, `MOVENET/movenet.py` (pure decoders), `dpu.py` (board), `replay.py` (laptop), `cascade.py`, `tracking.py`, `world.py` | `Detector.detect(frame)`, `PoseEstimator.estimate(frame, box)`, `Tracker`, `WorldModel` |
+| `core/` | `guardian_node.py` (per-frame loop, states; `reconfigure()`), `scheduler.py`, `predictor.py`, `rules.py` (rules, `body_gap_m`, `near_threshold`, depth gate, `combine`, `DecisionLatch`) | `GuardianNode.step() -> Snapshot`; a `Decision` per frame to the actuators |
+| `actuators/` | `actuator_manager.py`, `audio.py`, `robot_link.py`, `event_diary.py` | `update(decision, t)`, `configure(cfg)` |
+| `dashboard/` | `views.py`, `sinks.py` (MJPEG + `/api/params`, `/api/reset`; mp4; DisplayPort), `tuning.py`, `webui.py` | `Dashboard.render(snapshot) -> image`, `Sink.show(image)` |
+| `utils/` | `types.py`, `settings.py` (all defaults, one comment each), `geometry.py`, `clock.py`, `event_log.py`; upstream `config.py`, `logger.py`, `lock.py` | – |
+| top level | `main.py` (CLI, config layering `configs`, wiring `build`, `replay_models`, `DEMO_CASCADE`, loop), `run.sh`, `tools/power_experiment.py` | – |
+
+`legacy/` holds the upstream code Guardian does not use (reference only, not runnable).
 
 ## Design decisions (and why)
 
@@ -93,14 +85,14 @@ Only the camera, perception backend, clock and beacon differ between laptop and 
 **Distance and rules**
 - Distances are monocular: depth = focal_px × person_height_m / box size. `focal_px` (550) is assumed, not calibrated.
 - **`down` uses the body gap** (`RuleEngine.body_gap_m`): the smallest distance from any visible human joint to the hull of all visible robot joints. The centre-to-centre gap and the arm hull never reached STOP for a lying person, because the arms are above them.
-- Rules are deterministic, and only `rules.py` decides. No model output reaches the outputs directly.
+- Rules are deterministic, and only `core/rules.py` decides. No model output reaches the outputs directly.
 - A predicted STOP becomes a WARN with a time to contact.
 
 **Bands and model choice**
 - The bands (FAR > 3 m, APPROACH, CLOSE < 1.5 m) set the detector and pose rates.
 - Each band can name its own detector: specialised models chosen by a deterministic selector, like altitude-specific drone models.
 
-**Cascades** (`guardian/cascade.py`)
+**Cascades** (`VIDEO_pipeline/cascade.py`)
 - A band's detector and `pose.models` may be a list, cheapest first.
 - A cheap result is accepted only when it is confident and agrees with the tracker.
 - **"Nobody there" is never trusted:** a confirmed track without a matching detection escalates.
@@ -126,6 +118,11 @@ Only the camera, perception backend, clock and beacon differ between laptop and 
 
 ## Pitfalls found so far
 
+- **Live office run (2026-09-24):** boxes cut off by the frame gave wrong depths, and `reach` fired STOP between a
+  person near the camera and people metres behind (image overlap only). Fixed with cut-box depth
+  (`WorldModel.cut`, `person_width_m`) and the depth gate (`rules.depth_gate_m`). Still open: the robot role
+  goes to the leftmost person, and the band flips often with noisy real distances.
+
 - **Replay stand-ins can be too kind.** `ReplayPose` used to return ground truth for any crop. That made the cheap-only run look safe. It is now crop-aware: below 60 % coverage it returns low-confidence keypoints. Be sure a stand-in isn't hiding the failure a test is meant to catch.
 - **Scenario artefacts look like features.** A one-frame "teleport" fall produced fake joint velocities (an early predicted WARN) and no measurable acceleration. The fall is now animated. Robot keyframes are piecewise linear, so reversals are genuine one-frame velocity jumps.
 - **`from_behind` treats "no face points" as "facing away".** This is a known false-STOP risk with poses that lack face points or confidence; the cascade's "face needed" trigger avoids it for SPnet. See open work.
@@ -139,8 +136,8 @@ Only the camera, perception backend, clock and beacon differ between laptop and 
 
 - Commits: `sw: <lowercase imperative>`, no body, signed, explicit paths staged. Ask before pushing anything but `guardian-node`.
 - Branch `guardian-node` on the fork `Smephite/CPSA_2026`; upstream is `fcabecciaw/CPSA_2026`.
-- Keep `guardian/perception/{yolo,movenet}.py` pure (no board imports), so the decoders stay testable. Board-only imports are lazy.
-- New settings: add a default with a comment in `config.py`. If they should be tunable, add a `Param` and an `EFFECTS` entry in `tuning.py`; `test_every_param_exists_in_defaults_and_is_described` enforces this. Components read settings in `configure(cfg)`, so they change live.
+- Keep `VIDEO_pipeline/{YOLO/yolo,MOVENET/movenet}.py` pure (no board imports), so the decoders stay testable. Board-only imports are lazy.
+- New settings: add a default with a comment in `utils/settings.py`. If they should be tunable, add a `Param` and an `EFFECTS` entry in `dashboard/tuning.py`; `test_every_param_exists_in_defaults_and_is_described` enforces this. Components read settings in `configure(cfg)`, so they change live.
 - Mark unmeasured numbers as estimates, as the survey does ([zoo] / [ours] / [est]).
 
 ## Open work
