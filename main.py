@@ -54,7 +54,8 @@ def parse_args(argv=None):
     p.add_argument("--record", help="write the dashboard to this .mp4")
     p.add_argument("--snapshots", help="save a dashboard PNG every N seconds into this folder (with --snapshot-every)")
     p.add_argument("--snapshot-every", type=float, default=2.0)
-    p.add_argument("--no-audio", action="store_true")
+    p.add_argument("--silent", "--no-audio", dest="no_audio", action="store_true",
+                   help="silent mode: no sound output (visual warnings only)")
     p.add_argument("--power", action="store_true", help="read the board's power rails (pynq)")
     p.add_argument("--no-log", action="store_true", help="do not write the upstream system log / event diary")
     p.add_argument("--tuning", default=os.path.join(HERE, "guardian_tuning.json"),

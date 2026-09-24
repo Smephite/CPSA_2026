@@ -141,3 +141,13 @@ def test_http_api(tune, cfg):
         assert cfg["rules"]["reach_m"] == 0.8
     finally:
         sink.close()
+
+
+@pytest.mark.parametrize("flag", ["--silent", "--no-audio"])
+def test_silent_mode_disables_audio(flag):
+    from actuators.audio import NullAudio
+    args = main.parse_args(["--fast", "--no-log", "--port", "0", "--tuning", "", flag])
+    cfg, _ = main.configs(args)
+    node, *_ = main.build(args, cfg)
+    assert args.no_audio and cfg["audio"]["enabled"] is False
+    assert any(isinstance(a, NullAudio) for a in node.actuators.actuators)

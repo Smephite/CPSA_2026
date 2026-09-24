@@ -139,6 +139,7 @@ uv run python main.py --help
 ```sh
 git clone -b guardian-node https://github.com/Smephite/CPSA_2026.git guardian-node && cd guardian-node
 ./run.sh --power                  # webcam -> DPU -> HDMI dashboard (+ http://kria:8080/), board power on the dashboard
+./run.sh --power --silent         # same, silent mode: no sound, visual warnings only
 ./run.sh --power --duration 45 --snapshots out/live --snapshot-every 3 --tuning ''
 sudo systemctl start gdm          # afterwards: HDMI output stops the desktop, this brings it back
 ```
@@ -228,6 +229,8 @@ SPnet → MoveNet); these have laptop stand-ins only, no DPU backend yet. See [`
   does). Changes apply at the next frame, are logged, and are saved to `guardian_tuning.json` (git-ignored;
   `--tuning ''` turns this off). Command-line flags still win for their run.
 - Layering: defaults ← `config.yaml` ← tuning file ← command line.
+- **Silent mode**: `--silent` (or `--no-audio`) plays no sound at all; warnings stay visual. `audio.enabled`
+  can also be switched off live in the web UI, or for good in `config.yaml` (`guardian: {audio: {enabled: false}}`).
 - **No authentication** on the web UI: use it on a trusted lab network only.
 
 ---
