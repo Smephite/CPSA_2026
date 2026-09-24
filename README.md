@@ -15,7 +15,7 @@ module structure. The upstream stereotypy system is in [`legacy/`](legacy/README
 | | |
 |---|---|
 | Board | AMD Kria KV260 (Zynq UltraScale+), DPU B4096, Ubuntu 22.04 + PYNQ-DPU 2.5 (Vitis AI 2.5 models only) |
-| Models | YOLOv3-VOC (person detection) and MoveNet Lightning (17 keypoints), Vitis AI 2.5 model zoo |
+| Models | YOLOv2-VOC pruned → YOLOv3-VOC detector cascade, MoveNet Lightning (17 keypoints); Vitis AI 2.5 model zoo |
 | Laptop | Everything except the DPU runs on a laptop against a synthetic scenario (Python 3.10, `uv`) |
 | Status | Laptop demo and 110 tests green. First live board run done; see [Status](#status) |
 
@@ -68,7 +68,7 @@ sensors/                  INPUTS: what the node measures
   scenario.py             DemoScenario: the four-beat demo world, with ground truth
 
 VIDEO_pipeline/           PERCEPTION: who is where, in what pose
-  YOLO/                   yolo.py (pure pre/post-processing) + the YOLOv3-VOC xmodel
+  YOLO/                   yolo.py, yolov2.py (pure pre/post-processing) + the YOLOv3-VOC and YOLOv2-VOC-pruned xmodels
   MOVENET/                movenet.py (pure pre/post-processing) + the MoveNet xmodel and model-zoo prototxt
   dpu.py                  board backends: PYNQ overlay, one vart runner per model
   replay.py               laptop stand-ins reading the scenario's ground truth
@@ -214,6 +214,8 @@ Each band names its own detector, so a specialised model can be chosen by a dete
 rather than one general model everywhere.
 
 A band's detector and `pose.models` may also be a **cascade**, cheapest first (`VIDEO_pipeline/cascade.py`).
+**By default every band runs YOLOv2-VOC pruned first (≈16 ms) and YOLOv3-VOC (≈76 ms) only when the cheap
+result is not trusted**; both run on the board.
 A cheap result is only accepted when it is confident and matches the tracker; "nobody there" is never trusted.
 The full model runs directly on a 3 s watchdog, near a rule threshold, on sudden torso acceleration, for lying
 people, and when the facing rule needs face points. `--cascade` runs the survey's pairs (RefineDet-ped → OFA-YOLO,
@@ -241,7 +243,8 @@ SPnet → MoveNet); these have laptop stand-ins only, no DPU backend yet. See [`
 |---|---|
 | Board power, camera on, between detections | ≈ 5.3 W (INA260 on the SOM supply) |
 | Board power during a YOLOv3 call | peaks ≈ 9.1 W |
-| YOLOv3-VOC call | ≈ 84 ms; loop ≈ 7 fps with YOLO at 2–3 Hz |
+| YOLOv3-VOC call | ≈ 76–84 ms; loop ≈ 7 fps with YOLO at 2–3 Hz |
+| YOLOv2-VOC pruned call (cheap detector stage) | ≈ 16 ms |
 | MoveNet on a crop | ≈ 7–10 ms DPU (earlier pose demo) |
 
 - **Power**: PYNQ's libsensors does not initialise on this image, so `sensors/power.py` reads the INA260 from

@@ -14,11 +14,12 @@ import numpy as np
 
 from utils.geometry import expand_box
 from VIDEO_pipeline.MOVENET import movenet as mn
-from VIDEO_pipeline.YOLO import yolo
+from VIDEO_pipeline.YOLO import yolo, yolov2
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # VIDEO_pipeline/
 MODELS = {
     "yolov3_voc": os.path.join(HERE, "YOLO", "pynqdpu.tf_yolov3_voc.DPUCZDX8G_ISA1_B4096.2.5.0.xmodel"),
+    "yolov2_voc_pruned": os.path.join(HERE, "YOLO", "yolov2_voc_pruned_0_77.xmodel"),
     "movenet": os.path.join(HERE, "MOVENET", "kv260_MoveNet_int.xmodel"),
 }
 MOVENET_PROTOTXT = os.path.join(HERE, "MOVENET", "movenet_ntd_pt.prototxt")
@@ -68,6 +69,29 @@ class YoloV3VocDetector:
         return dets
 
 
+class YoloV2VocDetector:
+    """Pruned YOLOv2-VOC (7.8 GOPs): the cheap first stage of the detector cascade (15.7 ms vs. 75.6 ms)."""
+    name = "yolov2_voc_pruned"
+
+    def __init__(self, runner, score_thresh=0.3):
+        self.runner = runner
+        self.score_thresh = score_thresh
+        self.size = tuple(runner.get_input_tensors()[0].dims)[1]
+        self.out = [np.empty(tuple(t.dims), np.float32, order="C") for t in runner.get_output_tensors()]
+        self.times = {}
+
+    def detect(self, frame):
+        t0 = time.perf_counter()
+        x = np.ascontiguousarray(yolov2.preprocess(frame.image, self.size))
+        t1 = time.perf_counter()
+        self.runner.wait(self.runner.execute_async([x], self.out))
+        t2 = time.perf_counter()
+        dets = yolov2.decode(self.out[0], frame.image.shape[:2], self.score_thresh)
+        self.times = {"det_pre": (t1 - t0) * 1e3, "det_dpu": (t2 - t1) * 1e3,
+                      "det_post": (time.perf_counter() - t2) * 1e3}
+        return dets
+
+
 class MoveNetPose:
     def __init__(self, runner, prototxt=MOVENET_PROTOTXT, margin=(0.25, 0.12)):
         self.runner = runner
@@ -99,7 +123,7 @@ class MoveNetPose:
         return kp
 
 
-DETECTORS = {"yolov3_voc": YoloV3VocDetector}
+DETECTORS = {"yolov3_voc": YoloV3VocDetector, "yolov2_voc_pruned": YoloV2VocDetector}
 
 
 POSES = {"movenet": MoveNetPose}

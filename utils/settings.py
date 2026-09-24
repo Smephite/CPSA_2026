@@ -30,10 +30,11 @@ DEFAULTS = {
         "hysteresis_m": 0.2,
         "fast_closing_mps": 0.8,     # closing faster than this -> one band closer
         "rates": {                   # per band: detector (one name, or a cascade list cheapest first), rates (Hz)
-            "detect":   {"detector": "yolov3_voc", "detector_hz": 3.0, "pose_hz": 0.0},
-            "far":      {"detector": "yolov3_voc", "detector_hz": 2.0, "pose_hz": 0.0},
-            "approach": {"detector": "yolov3_voc", "detector_hz": 2.0, "pose_hz": 5.0},
-            "close":    {"detector": "yolov3_voc", "detector_hz": 2.0, "pose_hz": 15.0},
+            # default: YOLOv2-VOC pruned (15.7 ms) first, YOLOv3-VOC (75.6 ms) when the cheap result is not trusted
+            "detect":   {"detector": ["yolov2_voc_pruned", "yolov3_voc"], "detector_hz": 3.0, "pose_hz": 0.0},
+            "far":      {"detector": ["yolov2_voc_pruned", "yolov3_voc"], "detector_hz": 2.0, "pose_hz": 0.0},
+            "approach": {"detector": ["yolov2_voc_pruned", "yolov3_voc"], "detector_hz": 2.0, "pose_hz": 5.0},
+            "close":    {"detector": ["yolov2_voc_pruned", "yolov3_voc"], "detector_hz": 2.0, "pose_hz": 15.0},
         },
     },
     "pose": {

@@ -84,7 +84,7 @@ def test_describe_shows_cascades_as_text(tune, cfg):
     cfg["bands"]["rates"]["close"]["detector"] = ["cheap", "yolov3_voc"]
     d = {p["path"]: p for p in tune.describe()}
     assert d["bands.rates.close.detector"]["value"] == "cheap > yolov3_voc"
-    assert d["bands.rates.close.detector"]["default"] == "yolov3_voc"
+    assert d["bands.rates.close.detector"]["default"] == "yolov2_voc_pruned > yolov3_voc"
 
 
 def test_live_rule_toggle_changes_the_running_node(tmp_path):

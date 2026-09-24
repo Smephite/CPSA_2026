@@ -6,6 +6,10 @@ from utils import settings as gcfg
 from utils.types import Level, NodeState
 
 
+# YOLOv3 alone in every band (the default is the YOLOv2 -> YOLOv3 cascade)
+YOLOV3_ONLY = {"bands": {"rates": {b: {"detector": "yolov3_voc"} for b in ("detect", "far", "approach", "close")}}}
+
+
 def simulate(overrides=None, models=None):
     args = main.parse_args(["--fast", "--no-log", "--no-audio", "--port", "0"])
     node, _, scenario, _, _ = main.build(args, gcfg._merge(gcfg.DEFAULTS, overrides))
@@ -20,7 +24,7 @@ def simulate(overrides=None, models=None):
             return snaps, node
 
 
-@pytest.fixture(scope="module", params=[None, main.DEMO_CASCADE], ids=["full", "cascade"])
+@pytest.fixture(scope="module", params=[YOLOV3_ONLY, None, main.DEMO_CASCADE], ids=["yolov3", "default", "cascade"])
 def run(request):
     return simulate(request.param)[0]
 
@@ -61,7 +65,7 @@ def test_idle_after_beacon_timeout(run):
 def test_cheap_models_alone_are_unsafe():
     """Control for the cascade: the cheap stand-ins alone false-STOP in beat 2 and lose the fallen human."""
     from VIDEO_pipeline.replay import CheapReplayDetector, CheapReplayPose
-    snaps, _ = simulate(models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
+    snaps, _ = simulate(YOLOV3_ONLY, models=({"yolov3_voc": CheapReplayDetector()}, {"movenet": CheapReplayPose()}))
     assert first(snaps, Level.STOP, "from_behind", 9.0, 16.0) is not None
     assert first(snaps, Level.STOP, "down", 23.0, 30.0) is None
 
@@ -72,7 +76,7 @@ def test_cascade_uses_both_stages_for_the_right_reasons():
     assert node.pose_cascade.reasons["face needed"] > 0 and node.det_cascade.reasons["lying box"] > 0
 
 
-@pytest.mark.parametrize("overrides", [None, main.DEMO_CASCADE], ids=["full", "cascade"])
+@pytest.mark.parametrize("overrides", [YOLOV3_ONLY, None, main.DEMO_CASCADE], ids=["yolov3", "default", "cascade"])
 def test_sudden_motion_only_on_the_fall_and_the_robot_reversal(overrides, monkeypatch):
     """Torso acceleration crosses the threshold during the fall (21.4-22 s) and when the scripted robot reverses
     in one frame (19 s), nowhere else: walking and pose noise stay below it."""
@@ -88,3 +92,8 @@ def test_sudden_motion_only_on_the_fall_and_the_robot_reversal(overrides, monkey
     simulate(overrides)
     assert any(r == "human" and 21.4 <= t <= 22.7 for t, r in hits)
     assert all((r == "human" and 21.4 <= t <= 22.7) or (r == "robot" and 19.0 <= t <= 19.5) for t, r in hits), hits
+
+
+def test_default_cascade_runs_yolov2_first():
+    _, node = simulate()
+    assert node.det_cascade.calls["yolov2_voc_pruned"] > 0 and node.det_cascade.calls["yolov3_voc"] > 0

@@ -118,6 +118,12 @@ Each box's `__init__.py` documents its interface. Boxes only talk through the ty
 
 ## Pitfalls found so far
 
+- **Models checked on the board (2026-09-24):** YOLOv3-VOC 75.6 ms, YOLOv2-VOC pruned 15.7 ms, MoveNet 5.8 ms per call;
+  all four probed models load together on one overlay (≈200 MB). YOLOv2-VOC pruned is now the cheap first detector
+  stage by default. **SPnet is not usable as a cheap pose stage:** its xmodel has two DPU subgraphs with a CPU
+  average-pool between them (PYNQ's `load_model` accepts one), and it regresses 14 joint coordinates with no
+  confidence per joint, so the cascade cannot tell a good cheap pose from a bad one.
+
 - **Live office run (2026-09-24):** boxes cut off by the frame gave wrong depths, and `reach` fired STOP between a
   person near the camera and people metres behind (image overlap only). Fixed with cut-box depth
   (`WorldModel.cut`, `person_width_m`) and the depth gate (`rules.depth_gate_m`). Still open: the robot role

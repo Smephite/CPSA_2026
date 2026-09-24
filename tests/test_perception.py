@@ -72,3 +72,20 @@ def test_dpu_model_files_exist():
     from VIDEO_pipeline import dpu                    # pynq_dpu is imported lazily: safe on a laptop
     for path in list(dpu.MODELS.values()) + [dpu.MOVENET_PROTOTXT]:
         assert os.path.isfile(path), path
+
+
+def test_yolov2_round_trip():
+    from VIDEO_pipeline.YOLO import yolov2
+    boxes = [(100, 40, 260, 420), (400, 120, 520, 400)]
+    dets = yolov2.decode(yolov2.encode_for_test(boxes, (480, 640)), (480, 640))
+    assert len(dets) == 2
+    got = sorted(d.box.tolist() for d in dets)
+    for g, b in zip(got, sorted(boxes)):
+        assert np.allclose(g, b, atol=2.0), (g, b)
+    assert all(d.label == "person" and d.score > 0.9 for d in dets)
+
+
+def test_yolov2_ignores_other_classes():
+    from VIDEO_pipeline.YOLO import yolov2
+    head = yolov2.encode_for_test([(100, 40, 260, 420)], (480, 640), cls=11)      # dog
+    assert yolov2.decode(head, (480, 640)) == []
