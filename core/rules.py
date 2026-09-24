@@ -2,6 +2,8 @@
 
 Each predicate looks at one snapshot (now, or a predicted future) and returns NONE / WARN / STOP:
 
+    (reach, down, pinned and overhead need contact: they stay NONE when the pair is more than depth_gate_m
+     apart in depth, i.e. the two only overlap in the image)
     reach        a human keypoint inside the robot's arm hull (shoulders, elbows, wrists) dilated by a margin
     from_behind  robot closing on a human who faces away from it
     down         human hip at or below knee height, or lying (wide box); WARN within down_warn_m, STOP within reach_m,
@@ -36,8 +38,9 @@ class Pair:
     robot: Body
     human: Body
     m_per_px: float
-    gap_m: float
+    gap_m: float                  # floor distance robot <-> human (includes depth)
     lines_px: List[np.ndarray]
+    depth_gap_m: float = 0.0      # |depth difference|; 0 when unknown (never rules contact out)
 
 
 class RuleEngine:
@@ -98,7 +101,13 @@ class RuleEngine:
 
     # ---------------------------------------------------------------- predicates
 
+    def apart_in_depth(self, p: Pair):
+        """Robot and human only overlap in the image: too far apart in depth to touch."""
+        return p.depth_gap_m > self.c["depth_gate_m"]
+
     def rule_reach(self, p: Pair) -> Level:
+        if self.apart_in_depth(p):
+            return Level.NONE
         hull = self.arm_hull(p.robot.kp)
         if hull is None:
             return Level.NONE
@@ -125,7 +134,7 @@ class RuleEngine:
         return kp[hips, 1].mean() >= kp[knees, 1].mean() - tol          # image y grows downwards
 
     def rule_down(self, p: Pair) -> Level:
-        if not self.is_down(p.human, p.m_per_px):
+        if self.apart_in_depth(p) or not self.is_down(p.human, p.m_per_px):
             return Level.NONE
         gap = self.body_gap_m(p)
         if gap <= self.c["reach_m"] or self.rule_reach(p) == Level.STOP:
@@ -133,7 +142,7 @@ class RuleEngine:
         return Level.WARN if gap <= self.c["down_warn_m"] else Level.NONE
 
     def rule_pinned(self, p: Pair) -> Level:
-        if not p.lines_px or p.gap_m > self.c["pin_gap_m"] or self._closing_mps(p) < self.c["closing_min_mps"]:
+        if self.apart_in_depth(p) or not p.lines_px or p.gap_m > self.c["pin_gap_m"] or self._closing_mps(p) < self.c["closing_min_mps"]:
             return Level.NONE
         h, r = box_center(p.human.box), box_center(p.robot.box)
         for line in p.lines_px:
@@ -156,6 +165,8 @@ class RuleEngine:
         return kp[wr, 1].min() < kp[sh, 1].min() - self.c["overhead_tol_m"] / m_per_px
 
     def rule_overhead(self, p: Pair) -> Level:
+        if self.apart_in_depth(p):
+            return Level.NONE
         overhead = self.load_overhead(p.robot.kp, p.m_per_px)
         return Level.STOP if overhead and p.gap_m <= self.c["drop_radius_m"] else Level.NONE
 
@@ -164,6 +175,8 @@ class RuleEngine:
     def near_threshold(self, p: Pair, band_m) -> bool:
         """True if a distance an enabled rule compares against a threshold is within band_m of it."""
         margins = []
+        if self.apart_in_depth(p):
+            return False
         if "reach" in self.enabled:
             hull = self.arm_hull(p.robot.kp)
             pts = p.human.kp[p.human.kp[:, 2] >= self.min_score, :2]

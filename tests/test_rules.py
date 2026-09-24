@@ -115,3 +115,24 @@ def test_latch_holds_stop_then_releases(cfg):
     latch.update(Level.WARN, [Danger("down", Level.WARN, Level.WARN, None)], 3.0)
     assert latch.update(Level.NONE, [], 3.9) == (Level.WARN, ("down",))
     assert latch.update(Level.NONE, [], 4.1)[0] == Level.NONE
+
+
+# ---------------------------------------------------------------- depth gate (live test: false STOPs across depth)
+
+
+def test_contact_rules_ignore_pairs_apart_in_depth(engine):
+    """Overlapping in the image but metres apart in depth: no contact rule fires."""
+    robot, touching = body(0.0, pose_front()), body(0.6, pose_front())
+    fallen = body(0.9, pose_fallen(+1))
+    near = Pair(robot, touching, M_PER_PX, 0.6, [], depth_gap_m=0.3)
+    apart = Pair(robot, touching, M_PER_PX, 0.6, [], depth_gap_m=3.0)
+    assert engine.rule_reach(near) == Level.STOP
+    assert engine.rule_reach(apart) == Level.NONE
+    assert engine.rule_down(Pair(robot, fallen, M_PER_PX, 0.9, [], depth_gap_m=3.0)) == Level.NONE
+    assert not engine.near_threshold(apart, 10.0)
+
+
+def test_unknown_depth_never_rules_contact_out(engine):
+    """depth_gap_m = 0 (the default, and what an unreliable depth gives) keeps the rules active."""
+    robot, touching = body(0.0, pose_front()), body(0.6, pose_front())
+    assert engine.rule_reach(pair(robot, touching, 0.6)) == Level.STOP

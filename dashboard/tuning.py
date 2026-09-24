@@ -52,6 +52,7 @@ def params(detector_specs=(), pose_specs=()):
     ps = [
         _f("camera.focal_px", 200, 2000, 10, "Pinhole focal length in px (distance from box size)"),
         _f("person_height_m", 1.0, 2.2, 0.05, "Body size that turns pixels into metres"),
+        _f("person_width_m", 0.2, 1.0, 0.05, "Body width, for depth when a box is cut at the top or bottom"),
         _f("beacon.absent_timeout_s", 0.5, 30, 0.5, "Beacon silent this long -> IDLE"),
         Param("roles.robot_is", "choice", help="Role rule when the second person appears",
               choices=("leftmost", "rightmost")),
@@ -84,6 +85,7 @@ def params(detector_specs=(), pose_specs=()):
         _i("predictor.steps", 1, 10, "Look-ahead samples within the horizon"),
         Param("rules.enabled", "multi", help="Active rules", choices=RULES),
         _f("rules.reach_margin_m", 0.0, 1.5, 0.05, "reach: dilation of the robot arm hull"),
+        _f("rules.depth_gate_m", 0.2, 5, 0.1, "contact rules: ignore pairs this far apart in depth"),
         _f("rules.reach_m", 0.1, 3, 0.05, "down: STOP within this body gap"),
         _f("rules.down_warn_m", 0.1, 5, 0.05, "down: WARN within this body gap"),
         _f("rules.down_tol_m", 0.0, 0.5, 0.01, "down: hip within this of knee height counts as down"),
@@ -194,6 +196,11 @@ EFFECTS = {
                                  "models on the next frame: lunges, falls, abrupt starts and stops. Lower escalates "
                                  "more often (walking already peaks around 1-2 m/s^2); higher only reacts to violent "
                                  "moves.",
+    "person_width_m": "Assumed body width, used for depth only when a person's box is cut off at the top or "
+                      "bottom of the frame (someone close to the camera). Higher places them farther away.",
+    "rules.depth_gate_m": "reach, down, pinned and overhead only fire when robot and human are within this "
+                          "distance in depth: people who only overlap in the image (one near the camera, one far "
+                          "behind) cannot touch. Larger is more cautious; ignored when a depth is unreliable.",
     "audio.enabled": "Warning tones on the node's audio output.",
     "audio.repeat_s": "How often the tone repeats while WARN or STOP holds.",
 }

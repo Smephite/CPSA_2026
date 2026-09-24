@@ -7,8 +7,10 @@ DEFAULTS = {
         "width": 640,
         "height": 480,
         "focal_px": 550.0,           # pinhole focal length in px (webcam ~60 deg HFOV at 640 px)
+        "edge_px": 3,                # a box side this close to the frame border counts as cut off
     },
     "person_height_m": 1.7,          # body size used to turn pixels into metres (monocular)
+    "person_width_m": 0.5,           # body width, for depth when the box is cut at the top or bottom
     "beacon": {
         "absent_timeout_s": 2.0,     # beacon silent this long -> IDLE
     },
@@ -58,6 +60,7 @@ DEFAULTS = {
     },
     "rules": {
         "reach_margin_m": 0.3,       # dilation of the robot arm hull
+        "depth_gate_m": 1.0,         # contact rules ignore pairs this far apart in depth (image overlap only)
         "reach_m": 0.8,              # 'within reach' for the posture rule
         "behind_m": 1.5,             # approach-from-behind only counts this close
         "closing_min_mps": 0.15,     # robot speed towards the human that counts as closing

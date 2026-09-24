@@ -185,7 +185,8 @@ class GuardianNode:
                     continue
                 h_vel = self.predictor.velocities(human)
                 now = Pair(self._body(robot), self._body(human), m_per_px,
-                           self.world.gap_m(robot.box, human.box), self.engine.lines_px)
+                           self.world.gap_m(robot.box, human.box), self.engine.lines_px,
+                           self.world.depth_gap_m(robot.box, human.box))
                 if pair and human is pair[1]:
                     self.body_gap = self.engine.body_gap_m(now)
                 fut = []
@@ -193,7 +194,8 @@ class GuardianNode:
                     rk, rb = Predictor.future(robot.kp, robot.box, r_vel, robot.vel, dt)
                     hk, hb = Predictor.future(human.kp, human.box, h_vel, human.vel, dt)
                     fut.append((dt, Pair(self._body(robot, rk, rb), self._body(human, hk, hb), m_per_px,
-                                         self.world.gap_m(rb, hb), self.engine.lines_px)))
+                                         self.world.gap_m(rb, hb), self.engine.lines_px,
+                                         self.world.depth_gap_m(rb, hb))))
                 sensitive |= self.engine.near_threshold(now, self.cfg["cascade"]["sensitivity_m"])
                 for d in self.engine.evaluate(now, fut):
                     d.human_id = human.id
