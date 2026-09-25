@@ -1,0 +1,14 @@
+ubuntu@kria:~/guardian-node$ ./run.sh 
+stream + tuning: http://localhost:8080/  (saved to /home/ubuntu/guardian-node/guardian_tuning.json)
+[ WARN:0@11.158] global cap_v4l.cpp:913 open VIDEOIO(V4L2:/dev/video0): can't open camera by index
+[ WARN:0@11.158] global cap.cpp:478 open VIDEOIO(V4L2): backend is generally available but can't be used to capture by index
+Traceback (most recent call last):
+  File "/home/ubuntu/guardian-node/main.py", line 220, in <module>
+    main()
+  File "/home/ubuntu/guardian-node/main.py", line 199, in main
+    snap = node.step()
+  File "/home/ubuntu/guardian-node/core/guardian_node.py", line 154, in step
+    self.camera.open()
+  File "/home/ubuntu/guardian-node/sensors/camera.py", line 22, in open
+    raise RuntimeError(f"cannot open /dev/video{self.index}")
+RuntimeError: cannot open /dev/video0

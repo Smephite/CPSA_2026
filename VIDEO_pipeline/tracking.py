@@ -3,8 +3,8 @@
 Nearest-centroid matching, gated by the track's box height. Between detector frames (the detector may run at
 1-3 Hz) boxes are predicted at constant velocity; pose observations (up to 15 Hz) keep the velocity current.
 
-Roles: when the second confirmed track appears, roles are locked once (leftmost = robot by default, the rest
-humans) and kept by the tracker. `assign_robot()` is the hook for the production rule (the robot is the track
+Roles: as soon as two people are tracked, the robot is locked once (leftmost = robot by default, the rest
+humans, shown as "nonna") and kept by the tracker. `assign_robot()` is the hook for the production rule (the robot is the track
 matching the beacon's reported position).
 """
 from dataclasses import dataclass, field
@@ -165,15 +165,22 @@ class Tracker:
         return [tr for tr in self.tracks.values() if tr.hits >= self.min_hits]
 
     def assign_roles(self):
+        """Demo guarantee: with two or more tracks there is one robot and every other track is a human (nonna).
+
+        The robot is locked once two people are tracked and at least one is confirmed (two people appearing
+        together wait one detection), picked among the confirmed tracks when there are two, and then kept.
+        Other tracks are humans from their first detection.
+        """
         conf = self.confirmed()
-        if self.robot_id is None and len(conf) >= 2:
+        if self.robot_id is None and len(self.tracks) >= 2 and conf:
+            pool = conf if len(conf) >= 2 else list(self.tracks.values())
             pick = min if self.robot_is == "leftmost" else max
-            self.robot_id = pick(conf, key=lambda tr: tr.center[0]).id
+            self.robot_id = pick(pool, key=lambda tr: tr.center[0]).id
         for tr in self.tracks.values():
             if self.robot_id is None:
                 tr.role = None
             else:
-                tr.role = "robot" if tr.id == self.robot_id else ("human" if tr.hits >= self.min_hits else None)
+                tr.role = "robot" if tr.id == self.robot_id else "human"
 
     def assign_robot(self, track_id):
         """Production hook: the robot is the track matching the beacon's reported position."""
